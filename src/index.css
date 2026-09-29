@@ -1,0 +1,6 @@
+:root {
+  --bg: #0b0e11; --fg: #eaecef; --muted: #848e9c; --line: #1e2329;
+  color-scheme: dark; font-family: system-ui, sans-serif;
+}
+body { margin: 0; background: var(--bg); color: var(--fg); }
+html, body, #root { margin: 0; width: 100%; min-height: 100%; }
