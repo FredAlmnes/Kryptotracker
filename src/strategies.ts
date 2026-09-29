@@ -38,6 +38,7 @@ export interface Strategy {
   rules: string[]
   warmup: number
   warmupFor?(barSeconds: number): number // når warmup avhenger av intervallet
+  trailAtr?: number // strategien bruker trailing stop på N × ATR
   prepare(c: Candle[], opts: { allowShort: boolean }): StrategyRunner
 }
 
@@ -69,6 +70,7 @@ export function makeEmaTrend(p: EmaTrendParams = EMA_DEFAULTS): Strategy {
       'Exit: stop eller motsatt EMA-kryss',
     ],
     warmup: Math.max(200, slow),
+    trailAtr: M,
     prepare(c, { allowShort }) {
       const cl = closes(c)
       const eF = emaValues(cl, fast)

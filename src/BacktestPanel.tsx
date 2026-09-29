@@ -3,6 +3,8 @@ import { fetchHistory, type ChartCandle } from './binance'
 import { backtest } from './backtest'
 import { warmupOf, type Strategy } from './strategies'
 import { SIZING_PRESETS } from './sizing'
+import SignalCard, { type Signal } from './paper/SignalCard'
+import type { TicketPrefill } from './paper/OrderTicket'
 
 const DEPTHS = [
   [5000, '5k lys'],
@@ -21,11 +23,13 @@ export default function BacktestPanel({
   interval,
   strategy,
   allowShort,
+  onTake,
 }: {
   symbol: string
   interval: string
   strategy: Strategy
   allowShort: boolean
+  onTake: (prefill: TicketPrefill) => void
 }) {
   const [candles, setCandles] = useState<ChartCandle[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -79,6 +83,23 @@ export default function BacktestPanel({
     return { cls: 'muted', text: 'Ingen posisjon', sub: 'Venter på neste signal' }
   })()
 
+  const signal: Signal | null = (() => {
+    if (!r || !candles) return null
+    const a = r.pending.find((x) => x?.type === 'enter')
+    if (a?.type === 'enter')
+      return { side: a.side, stop: a.stop, target: a.target, reason: a.reason, since: candles.at(-1)!.time, fresh: true }
+    if (r.open && !r.pending.some((x) => x?.type === 'exit'))
+      return {
+        side: r.open.side,
+        stop: r.open.stop,
+        target: r.open.target,
+        reason: `${r.open.reason} (${dateTime(candles[r.open.entryIndex].time)})`,
+        since: candles[r.open.entryIndex].time,
+        fresh: false,
+      }
+    return null
+  })()
+
   return (
     <aside className="panel">
       <h2>{strategy.name}</h2>
@@ -124,6 +145,7 @@ export default function BacktestPanel({
             <div className={`signal-text ${status.cls}`}>{status.text}</div>
             <div className="muted small">{status.sub}</div>
           </div>
+          {signal && <SignalCard symbol={symbol} interval={interval} strategy={strategy} signal={signal} onTake={onTake} />}
 
           <h3>
             Backtest{' '}

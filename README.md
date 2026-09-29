@@ -17,5 +17,8 @@ npm run dev
 - **Coin-side:** candlestick-graf (1m–1w) med SMA, EMA, RSI, fair value gaps og topper/bunner
 - **Signaler og backtest:** tre strategier i `src/strategies.ts`, testet i `src/backtest.ts`
   (signal på lukket lys, handel på neste åpning, 0,15 % kostnad per side)
+- **Giring:** backtest med risikostyrt størrelse, futures-avgifter, funding og likvidasjon
+- **Strategilab:** alle strategier på alle coins, test på ukjent data og sammenligning av giring
+- **Papirkonto:** handle med falske penger på futures-priser, med SL/TP, trailing stop og signaler du kan ta med ett klikk
 
 Kun for læring og testing. Ikke finansiell rådgivning.

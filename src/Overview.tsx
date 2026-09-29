@@ -2,6 +2,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import { COINS } from './coins'
 import { useBinanceTickers, type Tick } from './hooks/useBinanceTickers'
 import { useDayTrends } from './hooks/useDayTrends'
+import { usePaper } from './paper/store'
+import { usd as fmtUsd } from './format'
 import './App.css'
 
 const usd = (n: number) =>
@@ -53,6 +55,7 @@ function Row({ name, ticker, tick, trend }: { name: string; ticker: string; tick
 export default function Overview() {
   const { ticks, status } = useBinanceTickers()
   const trends = useDayTrends()
+  const paper = usePaper()
   return (
     <main>
       <header>
@@ -60,6 +63,10 @@ export default function Overview() {
           KryptoTracker{' '}
           <Link to="/lab" className="lab-link">
             Strategilab →
+          </Link>
+          <Link to="/portfolio" className="lab-link">
+            Papirkonto {fmtUsd(paper.balance, 0)}
+            {paper.positions.length ? ` · ${paper.positions.length} åpne` : ''} →
           </Link>
         </h1>
         <span className={`status ${status}`}>

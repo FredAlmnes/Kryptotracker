@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { COINS } from './coins'
 import { useBinanceTickers } from './hooks/useBinanceTickers'
 import CandleChart, { INTERVALS, TOGGLES, type Indicators, type Interval } from './CandleChart'
 import BacktestPanel from './BacktestPanel'
 import { STRATEGIES } from './strategies'
+import OrderTicket, { type PreviewLine, type TicketPrefill } from './paper/OrderTicket'
+import PositionsTable from './paper/PositionsTable'
+import { usePaper } from './paper/store'
 
 export default function CoinDetail() {
   const { ticker } = useParams()
@@ -22,6 +25,21 @@ export default function CoinDetail() {
   const [strategyId, setStrategyId] = useState<string>(STRATEGIES[0].id)
   const [allowShort, setAllowShort] = useState(true)
   const { ticks } = useBinanceTickers()
+  const [ticket, setTicket] = useState<TicketPrefill | null>(null)
+  const [preview, setPreview] = useState<PreviewLine[]>([])
+  const paper = usePaper()
+  const priceLines = useMemo(() => {
+    const lines: PreviewLine[] = [...preview]
+    for (const p of paper.positions) {
+      if (p.symbol !== coin?.symbol) continue
+      const label = p.side === 'long' ? 'Long' : 'Short'
+      lines.push({ price: p.entry, color: '#848e9c', title: `${label} ${p.leverage}x` })
+      if (p.stop) lines.push({ price: p.stop, color: '#ea3943', title: p.trail ? 'SL (trailing)' : 'SL' })
+      if (p.target) lines.push({ price: p.target, color: '#16c784', title: 'TP' })
+      if (p.liq > 0) lines.push({ price: p.liq, color: '#f0b90b', title: 'Likv.' })
+    }
+    return lines
+  }, [paper.positions, preview, coin?.symbol])
 
   if (!coin) {
     return (
@@ -85,6 +103,11 @@ export default function CoinDetail() {
         <button className={allowShort ? 'active' : ''} onClick={() => setAllowShort((v) => !v)}>
           Short
         </button>
+        <span className="sep" />
+        <button onClick={() => setTicket({ side: 'long' })}>Ny ordre</button>
+        <Link to="/portfolio" className="nav-link">
+          Papirkonto →
+        </Link>
       </div>
       <div className="detail-body">
         <CandleChart
@@ -93,10 +116,34 @@ export default function CoinDetail() {
           indicators={indicators}
           strategy={strategy}
           allowShort={allowShort}
+          priceLines={priceLines}
         />
-        {strategy && (
-          <BacktestPanel symbol={coin.symbol} interval={interval} strategy={strategy} allowShort={allowShort} />
-        )}
+        <div className="side">
+          {ticket && (
+            <OrderTicket
+              key={JSON.stringify(ticket)}
+              symbol={coin.symbol}
+              prefill={ticket}
+              onClose={() => setTicket(null)}
+              onPreview={setPreview}
+            />
+          )}
+          {paper.positions.some((p) => p.symbol === coin.symbol) && (
+            <div className="side-block">
+              <h3>Papirposisjoner</h3>
+              <PositionsTable symbol={coin.symbol} />
+            </div>
+          )}
+          {strategy && (
+            <BacktestPanel
+              symbol={coin.symbol}
+              interval={interval}
+              strategy={strategy}
+              allowShort={allowShort}
+              onTake={setTicket}
+            />
+          )}
+        </div>
       </div>
     </main>
   )

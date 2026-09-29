@@ -52,12 +52,14 @@ export default function CandleChart({
   indicators,
   strategy,
   allowShort,
+  priceLines = [],
 }: {
   symbol: string
   interval: Interval
   indicators: Indicators
   strategy: Strategy | null
   allowShort: boolean
+  priceLines?: { price: number; color: string; title: string }[]
 }) {
   const box = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
@@ -244,6 +246,24 @@ export default function CandleChart({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineKey])
+
+  // entry/SL/TP/likvidasjon for papirposisjoner og ordren du holder på med
+  useEffect(() => {
+    const s = series.current
+    if (!s) return
+    const created = priceLines.map((l) =>
+      s.createPriceLine({ price: l.price, color: l.color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: l.title }),
+    )
+    return () => {
+      for (const pl of created) {
+        try {
+          s.removePriceLine(pl)
+        } catch {
+          /* grafen er fjernet */
+        }
+      }
+    }
+  }, [priceLines])
 
   useEffect(() => {
     refreshOverlays()
