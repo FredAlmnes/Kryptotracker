@@ -49,3 +49,17 @@ tr.clickable:hover { background: #151a20; }
 .depth { display: flex; align-items: center; gap: 0.35rem; margin-top: 0.9rem; flex-wrap: wrap; }
 .depth button { background: none; border: 1px solid var(--line); color: var(--muted); padding: 0.25rem 0.6rem; border-radius: 6px; cursor: pointer; font: inherit; font-size: 0.8rem; }
 .depth button.active { background: var(--line); color: var(--fg); border-color: var(--muted); }
+.lab-link { font-size: 0.9rem; font-weight: 400; margin-left: 1rem; color: var(--muted); text-decoration: none; }
+.lab-link:hover { color: var(--fg); }
+.intervals .label { align-self: center; }
+.lab-intro { max-width: 900px; line-height: 1.5; margin: 0.25rem 0 1rem; }
+.table-scroll { overflow-x: auto; }
+.lab-table { font-size: 0.88rem; white-space: nowrap; }
+.lab-table th, .lab-table td { padding: 0.45rem 0.6rem; }
+.lab-table th.group { text-align: center; border-bottom: 1px solid var(--muted); }
+.lab-table tr.first td { border-top: 2px solid var(--muted); }
+.lab-table td.beat { font-weight: 700; }
+.lab-h2 { font-size: 1.1rem; margin: 2rem 0 0.3rem; }
+.grid { width: auto; margin: 0.75rem 0; }
+.grid td { min-width: 90px; text-align: center; }
+.grid td.current { outline: 2px solid var(--fg); outline-offset: -2px; }

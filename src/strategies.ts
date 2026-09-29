@@ -43,44 +43,56 @@ export interface Strategy {
 const crossUp = (a: number[], b: number[], i: number) => a[i - 1] <= b[i - 1] && a[i] > b[i]
 const crossDown = (a: number[], b: number[], i: number) => a[i - 1] >= b[i - 1] && a[i] < b[i]
 
-const emaTrend: Strategy = {
-  id: 'ema-trend',
-  name: 'Filtrert EMA-trend',
-  interval: '4h',
-  rules: [
-    'Kjøp: EMA 20 krysser over EMA 50 og kursen er over SMA 200',
-    'Short: EMA 20 krysser under EMA 50, kursen under SMA 200 og ADX > 20',
-    'Stop: 2,5 × ATR, flyttes etter kursen (trailing)',
-    'Exit: stop eller motsatt EMA-kryss',
-  ],
-  warmup: 200,
-  prepare(c, { allowShort }) {
-    const cl = closes(c)
-    const e20 = emaValues(cl, 20)
-    const e50 = emaValues(cl, 50)
-    const s200 = smaValues(cl, 200)
-    const atr = atrValues(c, 14)
-    const adx = adxValues(c, 14)
-    const M = 2.5
-    return {
-      decide(i, pos) {
-        const close = cl[i]
-        if (pos) {
-          if (pos.side === 'long' && crossDown(e20, e50, i)) return { type: 'exit', reason: 'EMA-kryss ned' }
-          if (pos.side === 'short' && crossUp(e20, e50, i)) return { type: 'exit', reason: 'EMA-kryss opp' }
-          const trail =
-            pos.side === 'long' ? Math.max(pos.stop, close - M * atr[i]) : Math.min(pos.stop, close + M * atr[i])
-          return trail !== pos.stop ? { type: 'stop', stop: trail } : null
-        }
-        if (crossUp(e20, e50, i) && close > s200[i])
-          return { type: 'enter', side: 'long', stop: close - M * atr[i], reason: 'EMA 20/50 kryss opp over SMA 200' }
-        if (allowShort && crossDown(e20, e50, i) && close < s200[i] && adx[i] > 20)
-          return { type: 'enter', side: 'short', stop: close + M * atr[i], reason: 'EMA 20/50 kryss ned under SMA 200' }
-        return null
-      },
-    }
-  },
+export interface EmaTrendParams {
+  fast: number
+  slow: number
+  atrMult: number
 }
+export const EMA_DEFAULTS: EmaTrendParams = { fast: 20, slow: 50, atrMult: 2.5 }
+
+export function makeEmaTrend(p: EmaTrendParams = EMA_DEFAULTS): Strategy {
+  const { fast, slow, atrMult: M } = p
+  const isDefault = fast === EMA_DEFAULTS.fast && slow === EMA_DEFAULTS.slow && M === EMA_DEFAULTS.atrMult
+  return {
+    id: isDefault ? 'ema-trend' : `ema-trend-${fast}-${slow}-${M}`,
+    name: isDefault ? 'Filtrert EMA-trend' : `EMA-trend ${fast}/${slow}`,
+    interval: '4h',
+    rules: [
+      `Kjøp: EMA ${fast} krysser over EMA ${slow} og kursen er over SMA 200`,
+      `Short: EMA ${fast} krysser under EMA ${slow}, kursen under SMA 200 og ADX > 20`,
+      `Stop: ${String(M).replace('.', ',')} × ATR, flyttes etter kursen (trailing)`,
+      'Exit: stop eller motsatt EMA-kryss',
+    ],
+    warmup: Math.max(200, slow),
+    prepare(c, { allowShort }) {
+      const cl = closes(c)
+      const eF = emaValues(cl, fast)
+      const eS = emaValues(cl, slow)
+      const s200 = smaValues(cl, 200)
+      const atr = atrValues(c, 14)
+      const adx = adxValues(c, 14)
+      return {
+        decide(i, pos) {
+          const close = cl[i]
+          if (pos) {
+            if (pos.side === 'long' && crossDown(eF, eS, i)) return { type: 'exit', reason: 'EMA-kryss ned' }
+            if (pos.side === 'short' && crossUp(eF, eS, i)) return { type: 'exit', reason: 'EMA-kryss opp' }
+            const trail =
+              pos.side === 'long' ? Math.max(pos.stop, close - M * atr[i]) : Math.min(pos.stop, close + M * atr[i])
+            return trail !== pos.stop ? { type: 'stop', stop: trail } : null
+          }
+          if (crossUp(eF, eS, i) && close > s200[i])
+            return { type: 'enter', side: 'long', stop: close - M * atr[i], reason: `EMA ${fast}/${slow} kryss opp over SMA 200` }
+          if (allowShort && crossDown(eF, eS, i) && close < s200[i] && adx[i] > 20)
+            return { type: 'enter', side: 'short', stop: close + M * atr[i], reason: `EMA ${fast}/${slow} kryss ned under SMA 200` }
+          return null
+        },
+      }
+    },
+  }
+}
+
+const emaTrend = makeEmaTrend()
 
 const fvgStructure: Strategy = {
   id: 'fvg-structure',

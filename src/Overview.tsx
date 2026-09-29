@@ -56,7 +56,12 @@ export default function Overview() {
   return (
     <main>
       <header>
-        <h1>KryptoTracker</h1>
+        <h1>
+          KryptoTracker{' '}
+          <Link to="/lab" className="lab-link">
+            Strategilab →
+          </Link>
+        </h1>
         <span className={`status ${status}`}>
           {status === 'live' ? '● Live' : status === 'connecting' ? '○ Kobler til…' : '○ Kobler til på nytt…'}
         </span>
