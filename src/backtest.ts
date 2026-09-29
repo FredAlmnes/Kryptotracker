@@ -1,5 +1,5 @@
 import type { Candle } from './indicators'
-import type { Action, Position, Side, Strategy } from './strategies'
+import { warmupOf, type Action, type Position, type Side, type Strategy } from './strategies'
 
 // Kostnader per side (inn og ut): Binance spot-avgift + litt slippage
 export const FEE = 0.001
@@ -56,7 +56,7 @@ export function backtest(c: Candle[], strategy: Strategy, opts: { allowShort: bo
   let pos: (Position & { reason: string }) | null = null
   let pending: Action[] = []
   let inMarket = 0
-  const start = Math.min(strategy.warmup, c.length - 1)
+  const start = Math.min(warmupOf(strategy, c), c.length - 1)
 
   const close = (i: number, price: number, reason: string) => {
     if (!pos) return

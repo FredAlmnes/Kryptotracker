@@ -37,8 +37,13 @@ export interface Strategy {
   interval: string // intervallet strategien er laget for
   rules: string[]
   warmup: number
+  warmupFor?(barSeconds: number): number // når warmup avhenger av intervallet
   prepare(c: Candle[], opts: { allowShort: boolean }): StrategyRunner
 }
+
+// Sekunder per lys, utledet fra dataene
+export const barSeconds = (c: Candle[]) => (c.length > 1 ? c[1].time - c[0].time : 86400)
+export const warmupOf = (s: Strategy, c: Candle[]) => s.warmupFor?.(barSeconds(c)) ?? s.warmup
 
 const crossUp = (a: number[], b: number[], i: number) => a[i - 1] <= b[i - 1] && a[i] > b[i]
 const crossDown = (a: number[], b: number[], i: number) => a[i - 1] >= b[i - 1] && a[i] < b[i]
@@ -93,6 +98,36 @@ export function makeEmaTrend(p: EmaTrendParams = EMA_DEFAULTS): Strategy {
 }
 
 const emaTrend = makeEmaTrend()
+
+// Ligg inne så lenge den store trenden er opp, gå til cash når den knekker.
+// Snittet er alltid 50 dager, uansett intervall (på 4t = 300 lys).
+const REGIME_DAYS = 50
+const REGIME_BUFFER = 0.03
+const regimeBars = (sec: number) => Math.max(1, Math.round((REGIME_DAYS * 86400) / sec))
+
+const trendRegime: Strategy = {
+  id: 'trend-regime',
+  name: 'Trendregime (hold, men unngå nedtrender)',
+  interval: '1d',
+  rules: [
+    `Inne (long) når kursen lukker over ${REGIME_DAYS}-dagers snitt`,
+    `Ut i cash når kursen lukker mer enn ${REGIME_BUFFER * 100} % under snittet`,
+    'Ingen stop, ingen short: målet er å fange oppturene og slippe de store fallene',
+  ],
+  warmup: REGIME_DAYS,
+  warmupFor: regimeBars,
+  prepare(c) {
+    const cl = closes(c)
+    const ma = smaValues(cl, regimeBars(barSeconds(c)))
+    return {
+      decide(i, pos) {
+        if (Number.isNaN(ma[i])) return null
+        if (pos) return cl[i] < ma[i] * (1 - REGIME_BUFFER) ? { type: 'exit', reason: `Under ${REGIME_DAYS}d-snitt` } : null
+        return cl[i] > ma[i] ? { type: 'enter', side: 'long', stop: 0, reason: `Over ${REGIME_DAYS}d-snitt` } : null
+      },
+    }
+  },
+}
 
 const fvgStructure: Strategy = {
   id: 'fvg-structure',
@@ -197,4 +232,4 @@ const rsiReversion: Strategy = {
   },
 }
 
-export const STRATEGIES: Strategy[] = [emaTrend, fvgStructure, rsiReversion]
+export const STRATEGIES: Strategy[] = [trendRegime, emaTrend, fvgStructure, rsiReversion]

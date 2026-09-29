@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchHistory, type ChartCandle } from './binance'
 import { backtest, FEE, SLIPPAGE } from './backtest'
-import type { Strategy } from './strategies'
+import { warmupOf, type Strategy } from './strategies'
 
 const DEPTHS = [
   [5000, '5k lys'],
@@ -54,7 +54,7 @@ export default function BacktestPanel({
   }, [symbol, interval, depth])
 
   const r = useMemo(
-    () => (candles && candles.length > strategy.warmup + 10 ? backtest(candles, strategy, { allowShort }) : null),
+    () => (candles && candles.length > warmupOf(strategy, candles) + 10 ? backtest(candles, strategy, { allowShort }) : null),
     [candles, strategy, allowShort],
   )
 
@@ -70,7 +70,7 @@ export default function BacktestPanel({
       return {
         cls: r.open.side === 'long' ? 'up' : 'down',
         text: `I ${r.open.side === 'long' ? 'LONG' : 'SHORT'} ${pct(ret)}`,
-        sub: `Inn ${dateTime(candles[r.open.entryIndex].time)} @ ${price(r.open.entry)} · stop ${price(r.open.stop)}${r.open.target ? ` · mål ${price(r.open.target)}` : ''}`,
+        sub: `Inn ${dateTime(candles[r.open.entryIndex].time)} @ ${price(r.open.entry)} ${r.open.stop > 0 ? ` · stop ${price(r.open.stop)}` : ''}${r.open.target ? ` · mål ${price(r.open.target)}` : ''}`,
       }
     }
     return { cls: 'muted', text: 'Ingen posisjon', sub: 'Venter på neste signal' }

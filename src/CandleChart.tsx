@@ -16,7 +16,7 @@ import {
 import { ema, fvgs, rsi, sma, swings, type Candle } from './indicators'
 import { fetchKlines, toCandle, type ChartCandle } from './binance'
 import { backtest } from './backtest'
-import type { Strategy } from './strategies'
+import { warmupOf, type Strategy } from './strategies'
 import { ZonesPrimitive } from './zones'
 
 export const INTERVALS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'] as const
@@ -125,7 +125,7 @@ export default function CandleChart({
       }
     }
 
-    if (strat && closed.length > strat.warmup) {
+    if (strat && closed.length > warmupOf(strat, closed)) {
       const r = backtest(closed, strat, { allowShort: short })
       for (const t of r.trades) {
         list.push(entryMarker(cs[t.entryIndex].time, t.side))

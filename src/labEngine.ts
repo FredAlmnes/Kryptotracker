@@ -1,6 +1,6 @@
 import { backtest, type BacktestResult } from './backtest'
 import type { Candle } from './indicators'
-import type { Strategy } from './strategies'
+import { warmupOf, type Strategy } from './strategies'
 
 export interface Segment {
   result: BacktestResult | null // null = for lite data i perioden
@@ -29,12 +29,13 @@ export function runSegment(
   let last = c.findIndex((x) => x.time >= toTime)
   if (last < 0) last = c.length
   if (first < 0 || last - first < 50) return { result: null, from: fromTime, to: toTime }
-  const start = Math.max(0, first - strategy.warmup)
+  const warmup = warmupOf(strategy, c)
+  const start = Math.max(0, first - warmup)
   const slice = c.slice(start, last)
-  if (slice.length <= strategy.warmup + 50) return { result: null, from: fromTime, to: toTime }
+  if (slice.length <= warmup + 50) return { result: null, from: fromTime, to: toTime }
   return {
     result: backtest(slice, strategy, { allowShort }),
-    from: slice[Math.min(strategy.warmup, slice.length - 1)].time,
+    from: slice[Math.min(warmup, slice.length - 1)].time,
     to: slice.at(-1)!.time,
   }
 }
