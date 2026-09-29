@@ -1,5 +1,6 @@
-import { backtest, type BacktestResult } from './backtest'
+import { backtest, type BacktestOptions, type BacktestResult } from './backtest'
 import type { Candle } from './indicators'
+import type { CostModel, Sizing } from './sizing'
 import { warmupOf, type Strategy } from './strategies'
 
 export interface Segment {
@@ -21,7 +22,7 @@ export interface LabRow {
 export function runSegment(
   c: Candle[],
   strategy: Strategy,
-  allowShort: boolean,
+  opts: BacktestOptions,
   fromTime: number,
   toTime = Infinity,
 ): Segment {
@@ -34,7 +35,7 @@ export function runSegment(
   const slice = c.slice(start, last)
   if (slice.length <= warmup + 50) return { result: null, from: fromTime, to: toTime }
   return {
-    result: backtest(slice, strategy, { allowShort }),
+    result: backtest(slice, strategy, opts),
     from: slice[Math.min(warmup, slice.length - 1)].time,
     to: slice.at(-1)!.time,
   }
@@ -43,7 +44,7 @@ export function runSegment(
 export function runLab(
   data: Record<string, Candle[]>,
   strategies: Strategy[],
-  opts: { allowShort: boolean; split: number },
+  opts: BacktestOptions & { split: number },
 ): LabRow[] {
   const rows: LabRow[] = []
   for (const strategy of strategies) {
@@ -52,9 +53,9 @@ export function runLab(
       rows.push({
         strategy,
         symbol,
-        full: runSegment(c, strategy, opts.allowShort, 0),
-        inSample: runSegment(c, strategy, opts.allowShort, 0, opts.split),
-        outSample: runSegment(c, strategy, opts.allowShort, opts.split),
+        full: runSegment(c, strategy, opts, 0),
+        inSample: runSegment(c, strategy, opts, 0, opts.split),
+        outSample: runSegment(c, strategy, opts, opts.split),
       })
     }
   }
@@ -67,13 +68,13 @@ export function runGrid(
   make: (a: number, b: number) => Strategy,
   xs: number[],
   ys: number[],
-  opts: { allowShort: boolean; from: number },
+  opts: BacktestOptions & { from: number },
 ) {
   return xs.map((x) =>
     ys.map((y) => {
       const strategy = make(x, y)
       const results = Object.values(data)
-        .map((c) => runSegment(c, strategy, opts.allowShort, opts.from).result)
+        .map((c) => runSegment(c, strategy, opts, opts.from).result)
         .filter((r): r is BacktestResult => r !== null)
       const avg = (f: (r: BacktestResult) => number) =>
         results.length ? results.reduce((s, r) => s + f(r), 0) / results.length : NaN
@@ -89,4 +90,32 @@ export function runGrid(
       }
     }),
   )
+}
+
+// Samme strategi med ulike størrelser/giring: hvor mye avkastning per fall får du?
+export function runSizing(
+  data: Record<string, Candle[]>,
+  strategy: Strategy,
+  configs: { sizing: Sizing; costs: CostModel }[],
+  opts: { allowShort: boolean; from: number },
+) {
+  return configs.map(({ sizing, costs }) => {
+    const perCoin = Object.entries(data).map(([symbol, c]) => ({
+      symbol,
+      result: runSegment(c, strategy, { allowShort: opts.allowShort, sizing, costs }, opts.from).result,
+    }))
+    const ok = perCoin.flatMap((x) => (x.result ? [x.result] : []))
+    const avg = (f: (r: BacktestResult) => number) => (ok.length ? ok.reduce((s, r) => s + f(r), 0) / ok.length : NaN)
+    return {
+      sizing,
+      costs,
+      perCoin,
+      avgCagr: avg((r) => r.cagr),
+      avgDrawdown: avg((r) => r.maxDrawdown),
+      avgCalmar: avg((r) => r.calmar),
+      liquidations: ok.reduce((s, r) => s + r.liquidations, 0),
+      ruined: ok.filter((r) => r.ruined).length,
+      longestStreak: Math.max(0, ...ok.map((r) => r.longestLosingStreak)),
+    }
+  })
 }

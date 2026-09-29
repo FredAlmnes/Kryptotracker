@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchHistory, type ChartCandle } from './binance'
-import { backtest, FEE, SLIPPAGE } from './backtest'
+import { backtest } from './backtest'
 import { warmupOf, type Strategy } from './strategies'
+import { SIZING_PRESETS } from './sizing'
 
 const DEPTHS = [
   [5000, '5k lys'],
@@ -30,6 +31,8 @@ export default function BacktestPanel({
   const [error, setError] = useState<string | null>(null)
   const [depth, setDepth] = useState(5000)
   const [progress, setProgress] = useState(0)
+  const [presetId, setPresetId] = useState('spot')
+  const preset = SIZING_PRESETS.find((p) => p.id === presetId) ?? SIZING_PRESETS[0]
 
   useEffect(() => {
     let cancelled = false
@@ -54,8 +57,8 @@ export default function BacktestPanel({
   }, [symbol, interval, depth])
 
   const r = useMemo(
-    () => (candles && candles.length > warmupOf(strategy, candles) + 10 ? backtest(candles, strategy, { allowShort }) : null),
-    [candles, strategy, allowShort],
+    () => (candles && candles.length > warmupOf(strategy, candles) + 10 ? backtest(candles, strategy, { allowShort, sizing: preset.sizing, costs: preset.costs }) : null),
+    [candles, strategy, allowShort, preset],
   )
 
   const status = (() => {
@@ -98,6 +101,17 @@ export default function BacktestPanel({
         ))}
       </div>
 
+      <div className="depth">
+        <span className="muted small">Størrelse</span>
+        <select value={presetId} onChange={(e) => setPresetId(e.target.value)}>
+          {SIZING_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {!r && !error && (
         <p className="muted">
           Henter historikk… {progress > 0 && `${progress.toLocaleString('nb-NO')} lys`}
@@ -134,6 +148,14 @@ export default function BacktestPanel({
                 </td>
               </tr>
               <tr>
+                <td>Årlig avkastning (CAGR)</td>
+                <td className={`num ${r.cagr >= 0 ? 'up' : 'down'}`}>{pct(r.cagr)}</td>
+              </tr>
+              <tr>
+                <td title="Årlig avkastning delt på største fall. Høyere er bedre.">Calmar (avkastning per fall)</td>
+                <td className="num">{r.calmar.toFixed(2)}</td>
+              </tr>
+              <tr>
                 <td>Handler</td>
                 <td className="num">{r.trades.length}</td>
               </tr>
@@ -149,6 +171,33 @@ export default function BacktestPanel({
                 <td>Snitt per handel</td>
                 <td className="num">{pct(r.avgTrade)}</td>
               </tr>
+              <tr>
+                <td>Lengste tapsrekke</td>
+                <td className="num">{r.longestLosingStreak} på rad</td>
+              </tr>
+              {r.avgR !== null && preset.sizing.mode === 'risk' && (
+                <tr>
+                  <td>Snitt R per handel</td>
+                  <td className="num">{r.avgR.toFixed(2)} R</td>
+                </tr>
+              )}
+              {preset.sizing.mode !== 'spot' && (
+                <>
+                  <tr>
+                    <td>Likvidasjoner</td>
+                    <td className={`num ${r.liquidations ? 'down' : ''}`}>
+                      {r.liquidations}
+                      {r.ruined && ' · kontoen gikk til 0'}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Avgifter / funding</td>
+                    <td className="num">
+                      {pct(-r.totalFees)} / {pct(-r.totalFunding)}
+                    </td>
+                  </tr>
+                </>
+              )}
               <tr>
                 <td>Tid i markedet</td>
                 <td className="num">{pct(r.exposure, false)}</td>
@@ -177,8 +226,10 @@ export default function BacktestPanel({
           </table>
 
           <p className="muted small">
-            Signal på lukket lys, handel på neste åpning. Kostnad {((FEE + SLIPPAGE) * 100).toFixed(2)}% per side (avgift +
-            slippage). Hele beløpet per handel, ingen gearing. Short forutsetter futures/margin, og funding er ikke regnet med.
+            Signal på lukket lys, handel på neste åpning.{' '}
+            {preset.sizing.mode === 'spot'
+              ? 'Spot: 0,15 % kostnad per side, hele kontoen per handel, ingen giring.'
+              : 'Futures: 0,1 % per side av posisjonen, funding 0,01 % per 8t, isolated margin. Uten stop brukes 1x.'}
             Historiske resultater er ingen garanti. Ikke finansiell rådgivning.
           </p>
         </>

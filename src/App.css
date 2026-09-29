@@ -63,3 +63,4 @@ tr.clickable:hover { background: #151a20; }
 .grid { width: auto; margin: 0.75rem 0; }
 .grid td { min-width: 90px; text-align: center; }
 .grid td.current { outline: 2px solid var(--fg); outline-offset: -2px; }
+.depth select, .panel select { background: #0b0e11; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 0.25rem 0.4rem; font: inherit; font-size: 0.82rem; }

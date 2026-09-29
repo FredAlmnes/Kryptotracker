@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { COINS } from './coins'
 import { fetchHistory, type ChartCandle } from './binance'
-import { runGrid, runLab, type Segment } from './labEngine'
+import { runGrid, runLab, runSizing, type Segment } from './labEngine'
+import { SIZING_PRESETS } from './sizing'
 import { makeEmaTrend, STRATEGIES } from './strategies'
 
 const INTERVALS = ['1h', '4h', '1d'] as const
@@ -47,6 +48,7 @@ export default function Lab() {
   const [data, setData] = useState<Record<string, ChartCandle[]> | null>(null)
   const [progress, setProgress] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [sizingStrategyId, setSizingStrategyId] = useState('ema-trend')
 
   useEffect(() => {
     let cancelled = false
@@ -93,6 +95,11 @@ export default function Lab() {
         ? runGrid(data, (fast, slow) => makeEmaTrend({ fast, slow, atrMult: 2.5 }), FASTS, SLOWS, { allowShort, from: split })
         : [],
     [data, allowShort, split],
+  )
+  const sizingStrategy = STRATEGIES.find((st) => st.id === sizingStrategyId) ?? STRATEGIES[0]
+  const sizingRows = useMemo(
+    () => (data ? runSizing(data, sizingStrategy, SIZING_PRESETS, { allowShort, from: split }) : []),
+    [data, sizingStrategy, allowShort, split],
   )
   const tickerOf = (symbol: string) => COINS.find((c) => c.symbol === symbol)?.ticker ?? symbol
 
@@ -225,6 +232,70 @@ export default function Lab() {
               ))}
             </tbody>
           </table>
+          <h2 className="lab-h2">Giring og posisjonsstørrelse</h2>
+          <p className="muted small lab-intro">
+            Samme signaler, ulik størrelse. <strong>Risiko %</strong> = hva du taper hvis stopen treffes. Giringen bestemmer
+            bare hvor mye margin som låses, og settes så lavt at likvidasjon ligger bak stopen. <strong>Calmar</strong> =
+            årlig avkastning delt på største fall: høyere er bedre, og viser om giringen faktisk lønner seg. Fra {splitYear},
+            futures-kostnader (0,1 % per side + funding) for alt unntatt spot.
+          </p>
+          <div className="intervals">
+            <select value={sizingStrategyId} onChange={(e) => setSizingStrategyId(e.target.value)}>
+              {STRATEGIES.map((st) => (
+                <option key={st.id} value={st.id}>
+                  {st.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="table-scroll">
+            <table className="lab-table">
+              <thead>
+                <tr>
+                  <th>Størrelse</th>
+                  {COINS.map((c) => (
+                    <th key={c.symbol} className="num">
+                      {c.ticker} <span className="muted">avk. / fall</span>
+                    </th>
+                  ))}
+                  <th className="num">Årlig snitt</th>
+                  <th className="num">Calmar</th>
+                  <th className="num">Likvidert</th>
+                  <th className="num">Lengste tapsrekke</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sizingRows.map((row) => (
+                  <tr key={row.sizing.mode + JSON.stringify(row.sizing)}>
+                    <td>{SIZING_PRESETS.find((p) => p.sizing === row.sizing)?.label}</td>
+                    {row.perCoin.map(({ symbol, result: r }) => (
+                      <td key={symbol} className="num">
+                        {r ? (
+                          <>
+                            <span className={cls(r.totalReturn)}>{pct(r.totalReturn)}</span>{' '}
+                            <span className="muted">/ {pct(-r.maxDrawdown)}</span>
+                            {r.ruined && ' ☠'}
+                          </>
+                        ) : (
+                          '–'
+                        )}
+                      </td>
+                    ))}
+                    <td className={`num ${cls(row.avgCagr)}`}>{pct(row.avgCagr)}</td>
+                    <td className="num">
+                      <strong>{row.avgCalmar.toFixed(2)}</strong>
+                    </td>
+                    <td className={`num ${row.liquidations ? 'down' : 'muted'}`}>
+                      {row.liquidations}
+                      {row.ruined > 0 && ` (${row.ruined} til 0)`}
+                    </td>
+                    <td className="num muted">{row.longestStreak}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
           <p className="muted small">
             Ruten med ramme er standardoppsettet (20/50). Kostnad 0,15 % per side er med overalt. Ikke finansiell rådgivning.
           </p>
