@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:engine": "esbuild src/bot.ts --bundle --format=esm --platform=neutral --target=es2022 --outfile=supabase/functions/paper-engine/bot.bundle.js",
+    "deploy:engine": "npm run build:engine && supabase functions deploy paper-engine --no-verify-jwt --use-api"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
@@ -21,6 +23,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
+    "esbuild": "^0.28.2",
     "oxlint": "^1.81.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"

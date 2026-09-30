@@ -1,7 +1,12 @@
 // Papirmotoren: kjøres hvert minutt av pg_cron. Sjekker åpne posisjoner mot Binance futures 1m-lys,
-// flytter trailing stop ved 4t-lukk og trekker funding. Må kjøre i EU (Binance blokkerer USA).
+// flytter trailing stop ved 4t-lukk, trekker funding og lar botene handle når et lys lukkes.
+// Må kjøre i EU (Binance blokkerer USA).
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { H4, H8, trailPointsFrom, walk, type EnginePosition, type Kline } from './core.ts'
+// Strategi-, backtest- og størrelseskoden fra appen (src/bot.ts), pakket med `npm run build:engine`
+import { botStep } from './bot.bundle.js'
+
+const INTERVAL_MS: Record<string, number> = { '1h': 3600_000, '4h': H4, '1d': 24 * 3600_000 }
 
 const FAPI = 'https://fapi.binance.com/fapi/v1'
 const MINUTE = 60_000
@@ -74,6 +79,44 @@ Deno.serve(async () => {
         }
       } catch (e) {
         log.push(`${p.symbol}: feil ${e instanceof Error ? e.message : e}`)
+      }
+    }
+
+    // 3) botene: vurder hvert nylig lukkede lys med samme strategi-kode som backtesten
+    const { data: bots } = await db.from('paper_bots').select('*').eq('enabled', true)
+    for (const bot of bots ?? []) {
+      const ms = INTERVAL_MS[bot.interval]
+      if (!ms) continue
+      const closedOpen = Math.floor(now / ms) * ms - ms // åpningstid for siste lukkede lys
+      if ((bot.last_candle ?? 0) >= closedOpen) continue
+      try {
+        const bars = await klines(bot.symbol, bot.interval, closedOpen - 499 * ms, closedOpen, 500)
+        const candles = bars
+          .filter((k) => k[0] <= closedOpen)
+          .map((k) => ({ time: k[0] / 1000, open: +k[1], high: +k[2], low: +k[3], close: +k[4] }))
+        const [{ data: acc }, { data: open }, markRes] = await Promise.all([
+          db.from('paper_account').select('balance').eq('id', 1).single(),
+          db.from('paper_positions').select('id, bot_id, side, margin'),
+          fetch(`${FAPI}/premiumIndex?symbol=${bot.symbol}`),
+        ])
+        const mark = +(await markRes.json()).markPrice
+        const mine = (open ?? []).find((x) => x.bot_id === bot.id)
+        const used = (open ?? []).reduce((sum, x) => sum + x.margin, 0)
+        const step = botStep(bot, candles, !!mine, acc!.balance, acc!.balance - used, mark, Date.now())
+        let action: string | null = null
+        if (step.exit && mine) {
+          const exitPrice = mark * (1 + (mine.side === 'long' ? -1 : 1) * 0.0005)
+          await db.rpc('paper_close', { p_id: mine.id, p_price: exitPrice, p_reason: 'Signal', p_time: Date.now(), p_by_server: true })
+          action = `Lukket ${mine.side}: ${step.exit}`
+        }
+        if (step.open) {
+          const { error: openError } = await db.rpc('paper_bot_open', { p_bot_id: bot.id, p: step.open })
+          action = openError ? `Kunne ikke åpne: ${openError.message}` : `Åpnet ${step.open.side} ${step.open.qty} @ ${step.open.entry.toFixed(2)} (${step.note})`
+        } else if (!action && step.note) action = step.note
+        await db.rpc('paper_bot_mark', { p_id: bot.id, p_last_candle: closedOpen, p_action: action, p_time: Date.now() })
+        log.push(`bot ${bot.id}: ${action ?? 'ingen signal'}`)
+      } catch (e) {
+        log.push(`bot ${bot.id}: feil ${e instanceof Error ? e.message : e}`)
       }
     }
   } finally {

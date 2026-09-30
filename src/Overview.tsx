@@ -65,7 +65,7 @@ export default function Overview() {
             Strategilab →
           </Link>
           <Link to="/portfolio" className="lab-link">
-            Papirkonto {fmtUsd(paper.balance, 0)}
+            Bot {fmtUsd(paper.balance, 0)}
             {paper.positions.length ? ` · ${paper.positions.length} åpne` : ''} →
           </Link>
         </h1>

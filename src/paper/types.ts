@@ -25,9 +25,10 @@ export interface PaperPosition {
   riskUSD: number | null
   strategyId?: string
   signalId?: string
+  botId?: string
 }
 
-export type CloseReason = 'Stop' | 'Trailing stop' | 'Mål' | 'Likvidert' | 'Manuell'
+export type CloseReason = 'Stop' | 'Trailing stop' | 'Mål' | 'Likvidert' | 'Manuell' | 'Signal'
 
 export interface PaperTrade {
   id: string
@@ -46,6 +47,21 @@ export interface PaperTrade {
   r: number | null
   strategyId?: string
   byServer: boolean // lukket av motoren på serveren
+  botId?: string
+}
+
+export interface PaperBot {
+  id: string
+  enabled: boolean
+  strategyId: string
+  symbol: string
+  interval: string
+  allowShort: boolean
+  riskPct: number
+  maxLeverage: number
+  lastCandle: number | null
+  lastAction: string | null
+  lastActionAt: number | null
 }
 
 export interface PaperState {
@@ -57,4 +73,5 @@ export interface PaperState {
   takenSignals: string[]
   createdAt: number
   engineCheckedAt: number | null
+  bots: PaperBot[]
 }

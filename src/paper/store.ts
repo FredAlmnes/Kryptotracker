@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { supabase } from '../supabase'
-import type { PaperPosition, PaperSettings, PaperState, PaperTrade } from './types'
+import type { PaperBot, PaperPosition, PaperSettings, PaperState, PaperTrade } from './types'
 
 // Felles papirkonto i Supabase. Alle ser den samme, og endringer kommer inn live (Realtime).
 
@@ -15,6 +15,7 @@ let state: PaperState = {
   takenSignals: [],
   createdAt: Date.now(),
   engineCheckedAt: null,
+  bots: [],
 }
 let loadError: string | null = null
 const listeners = new Set<() => void>()
@@ -39,6 +40,7 @@ const toPosition = (r: any): PaperPosition => ({
   riskUSD: r.risk_usd,
   strategyId: r.strategy_id ?? undefined,
   signalId: r.signal_id ?? undefined,
+  botId: r.bot_id ?? undefined,
 })
 
 const toTrade = (r: any): PaperTrade => ({
@@ -58,16 +60,32 @@ const toTrade = (r: any): PaperTrade => ({
   r: r.r,
   strategyId: r.strategy_id ?? undefined,
   byServer: r.by_server,
+  botId: r.bot_id ?? undefined,
+})
+
+const toBot = (r: any): PaperBot => ({
+  id: r.id,
+  enabled: r.enabled,
+  strategyId: r.strategy_id,
+  symbol: r.symbol,
+  interval: r.interval,
+  allowShort: r.allow_short,
+  riskPct: r.risk_pct,
+  maxLeverage: r.max_leverage,
+  lastCandle: r.last_candle,
+  lastAction: r.last_action,
+  lastActionAt: r.last_action_at,
 })
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 async function reload() {
-  const [acc, pos, trades] = await Promise.all([
+  const [acc, pos, trades, bots] = await Promise.all([
     supabase.from('paper_account').select('*').eq('id', 1).single(),
     supabase.from('paper_positions').select('*').order('opened_at'),
     supabase.from('paper_trades').select('*').order('closed_at', { ascending: false }).limit(1000),
+    supabase.from('paper_bots').select('*').order('id'),
   ])
-  const error = acc.error ?? pos.error ?? trades.error
+  const error = acc.error ?? pos.error ?? trades.error ?? bots.error
   if (error) {
     loadError = error.message
     emit()
@@ -83,6 +101,7 @@ async function reload() {
     takenSignals: acc.data.taken_signals ?? [],
     createdAt: acc.data.created_at,
     engineCheckedAt: acc.data.engine_checked_at,
+    bots: (bots.data ?? []).map(toBot),
   }
   emit()
 }
@@ -99,7 +118,7 @@ function start() {
   started = true
   scheduleReload()
   const channel = supabase.channel('paper')
-  for (const table of ['paper_account', 'paper_positions', 'paper_trades'])
+  for (const table of ['paper_account', 'paper_positions', 'paper_trades', 'paper_bots'])
     channel.on('postgres_changes', { event: '*', schema: 'public', table }, scheduleReload)
   channel.subscribe()
   // sikkerhetsnett hvis Realtime faller ut
@@ -143,4 +162,5 @@ export const openPaperPosition = (payload: Record<string, unknown>) => call('pap
 export const closePaperPosition = (id: string, price: number) =>
   call('paper_close', { p_id: id, p_price: price, p_reason: 'Manuell', p_time: Date.now(), p_by_server: false })
 export const updatePaperSettings = (patch: Partial<PaperSettings>) => call('paper_update_settings', { p: patch })
+export const updatePaperBot = (id: string, patch: Record<string, unknown>) => call('paper_update_bot', { p_id: id, p: patch })
 export const resetPaper = (startBalance: number) => call('paper_reset', { p_start: startBalance })

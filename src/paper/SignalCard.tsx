@@ -36,6 +36,8 @@ export default function SignalCard({
   const coin = coinBySymbol(symbol)!
   const signalId = `${strategy.id}|${symbol}|${interval}|${signal.since}`
   const taken = paper.takenSignals.includes(signalId)
+  const bot = paper.bots.find((b) => b.enabled && b.strategyId === strategy.id && b.symbol === symbol && b.interval === interval)
+  const botPosition = bot && paper.positions.find((p) => p.botId === bot.id)
   const stop = signal.stop && signal.stop > 0 ? signal.stop : undefined
   // uten stop: samme forslag som ordreskjemaet (1x, 20 % av kontoen)
   const plan =
@@ -99,7 +101,11 @@ export default function SignalCard({
       </table>
       {stale && <p className="msg warn">Kursen har allerede passert stopen. Signalet er utløpt.</p>}
       {!stop && <p className="muted small">Ingen stop i denne strategien: forslaget er 1x og 20 % av kontoen.</p>}
-      {!isOwner ? (
+      {bot ? (
+        <p className="muted small">
+          🤖 Boten handler dette signalet selv{botPosition ? ' og har en åpen posisjon' : ''}. <Link to="/portfolio">Se boten →</Link>
+        </p>
+      ) : !isOwner ? (
         <p className="muted small">
           {taken ? 'Tatt i papirkontoen ✓' : 'Ikke tatt i papirkontoen.'} <Link to="/portfolio">Se kontoen →</Link>
         </p>

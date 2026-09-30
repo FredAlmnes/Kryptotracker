@@ -6,6 +6,7 @@ import { useMarkPrices } from '../prices'
 import { STRATEGIES } from '../strategies'
 import { journalStats, unrealizedPnl, usedMargin } from './engine'
 import PositionsTable from './PositionsTable'
+import BotsTable from './BotsTable'
 import { resetPaper, updatePaperSettings, usePaper, usePaperError } from './store'
 import { sendLoginLink, signOut, useAuth } from './auth'
 import type { PaperSettings } from './types'
@@ -39,7 +40,8 @@ export default function Portfolio() {
   const total = equity / paper.settings.startBalance - 1
   const stats = journalStats(paper)
   const s = paper.settings
-  const strategyName = (id?: string) => (id ? (STRATEGIES.find((x) => x.id === id)?.name ?? id) : 'Manuell')
+  const strategyName = (id?: string, botId?: string) =>
+    `${botId ? '🤖 ' : ''}${id ? (STRATEGIES.find((x) => x.id === id)?.name ?? id) : 'Manuell'}`
 
   const setSetting = (key: keyof PaperSettings, value: number) => {
     if (!Number.isFinite(value) || value <= 0 || value === s[key]) return
@@ -61,7 +63,7 @@ export default function Portfolio() {
         ← Alle coins
       </Link>
       <header className="detail-head">
-        <h1>Papirkonto</h1>
+        <h1>Papirkonto · bot</h1>
         <span className="muted small">
           Binance USDT-M futures-priser · isolated margin · ingen ekte penger ·{' '}
           <span className={engineAge !== null && engineAge < 150 ? 'up' : 'down'}>
@@ -95,6 +97,9 @@ export default function Portfolio() {
         </div>
       </div>
 
+      <h2 className="lab-h2">Boter</h2>
+      <BotsTable />
+
       <h2 className="lab-h2">Åpne posisjoner</h2>
       <PositionsTable />
 
@@ -127,7 +132,7 @@ export default function Portfolio() {
 
       <h2 className="lab-h2">Handelslogg</h2>
       {!paper.journal.length ? (
-        <p className="muted small">Ingen lukkede handler ennå. Åpne en coin og trykk «Ny ordre», eller ta et signal.</p>
+        <p className="muted small">Ingen lukkede handler ennå. Botene handler når neste signal kommer.</p>
       ) : (
         <div className="table-scroll">
           <table className="lab-table">
@@ -156,7 +161,7 @@ export default function Portfolio() {
                       <span className={t.side === 'long' ? 'up' : 'down'}>{t.side === 'long' ? 'Long' : 'Short'}</span>{' '}
                       {coinBySymbol(t.symbol)?.ticker} <span className="muted">{t.leverage}x</span>
                     </td>
-                    <td className="muted">{strategyName(t.strategyId)}</td>
+                    <td className="muted">{strategyName(t.strategyId, t.botId)}</td>
                     <td className="num">
                       {fmtPrice(t.entry)} → {fmtPrice(t.exit)}
                     </td>
