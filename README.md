@@ -19,6 +19,14 @@ npm run dev
   (signal på lukket lys, handel på neste åpning, 0,15 % kostnad per side)
 - **Giring:** backtest med risikostyrt størrelse, futures-avgifter, funding og likvidasjon
 - **Strategilab:** alle strategier på alle coins, test på ukjent data og sammenligning av giring
-- **Papirkonto:** handle med falske penger på futures-priser, med SL/TP, trailing stop og signaler du kan ta med ett klikk
+- **Papirkonto (felles, i Supabase):** alle kan følge kontoen live, bare eieren kan handle.
+  En motor på serveren (`supabase/functions/paper-engine`, kjørt hvert minutt av `pg_cron`) utfører
+  SL/TP, likvidasjon, trailing stop og funding, også når ingen har appen åpen.
+
+## Supabase
+
+- `supabase/migrations/`: tabeller, tilgangsregler (alle leser, bare eier/motor skriver) og cron-jobben
+- `supabase/functions/paper-engine/`: motoren. Må kjøre i EU (`x-region: eu-central-1`), Binance blokkerer USA
+- Første innloggede bruker blir eier av kontoen
 
 Kun for læring og testing. Ikke finansiell rådgivning.

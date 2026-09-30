@@ -22,7 +22,6 @@ export interface PaperPosition {
   openedAt: number
   fees: number
   funding: number
-  lastFundingTime: number
   riskUSD: number | null
   strategyId?: string
   signalId?: string
@@ -46,16 +45,16 @@ export interface PaperTrade {
   funding: number
   r: number | null
   strategyId?: string
-  replayed: boolean // lukket mens fanen var lukket (funnet ved gjennomgang i ettertid)
+  byServer: boolean // lukket av motoren på serveren
 }
 
 export interface PaperState {
-  version: 1
+  loaded: boolean
   balance: number // realisert saldo (wallet)
   positions: PaperPosition[]
-  journal: PaperTrade[]
+  journal: PaperTrade[] // eldste først
   settings: PaperSettings
   takenSignals: string[]
   createdAt: number
-  rev: number
+  engineCheckedAt: number | null
 }

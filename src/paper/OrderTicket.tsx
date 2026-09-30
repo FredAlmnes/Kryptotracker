@@ -3,8 +3,8 @@ import { coinBySymbol, roundStep, roundTick } from '../coins'
 import { useMarkPrice } from '../prices'
 import { hasValidStop, liquidationPrice, safeLeverage, stopBeforeLiq, type Side } from '../sizing'
 import { usd, price as fmtPrice, pct } from '../format'
-import { fillPrice, MMR, openPosition, TAKER_FEE, usedMargin } from './engine'
-import { updatePaper, usePaper } from './store'
+import { buildOpenPayload, fillPrice, MMR, TAKER_FEE, usedMargin } from './engine'
+import { openPaperPosition, usePaper } from './store'
 
 export interface TicketPrefill {
   side: Side
@@ -42,6 +42,8 @@ export default function OrderTicket({
   const [useTrail, setUseTrail] = useState(!!prefill.trail)
   const [riskPct, setRiskPct] = useState(String(paper.settings.riskPct * 100))
   const [marginStr, setMarginStr] = useState(String(Math.round(paper.balance * 0.2)))
+  const [sending, setSending] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [leverage, setLeverage] = useState(() => {
     const L = paper.settings.defaultLeverage
     if (!prefill.stop) return 1
@@ -106,23 +108,30 @@ export default function OrderTicket({
   }, [plan?.entry, plan?.liq, stop, target, useTrail])
   useEffect(() => () => onPreview([]), [onPreview])
 
-  const submit = () => {
-    if (!plan || plan.errors.length || !mark) return
-    updatePaper((s) =>
-      openPosition(s, {
-        symbol,
-        side,
-        qty: plan.qty,
-        leverage,
-        mark,
-        stop: plan.withStop ? stop : undefined,
-        target,
-        trail: useTrail && plan.withStop && prefill.trail ? prefill.trail : undefined,
-        strategyId: prefill.strategyId,
-        signalId: prefill.signalId,
-      }),
-    )
-    onClose()
+  const submit = async () => {
+    if (!plan || plan.errors.length || !mark || sending) return
+    setSending(true)
+    setSubmitError(null)
+    try {
+      await openPaperPosition(
+        buildOpenPayload({
+          symbol,
+          side,
+          qty: plan.qty,
+          leverage,
+          mark,
+          stop: plan.withStop ? stop : undefined,
+          target,
+          trail: useTrail && plan.withStop && prefill.trail ? prefill.trail : undefined,
+          strategyId: prefill.strategyId,
+          signalId: prefill.signalId,
+        }),
+      )
+      onClose()
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : String(e))
+      setSending(false)
+    }
   }
 
   return (
@@ -242,13 +251,15 @@ export default function OrderTicket({
           {w}
         </p>
       ))}
+      {submitError && <p className="msg error">{submitError}</p>}
       <button
         className={`submit ${side === 'long' ? 'up-bg' : 'down-bg'}`}
-        disabled={!plan || plan.errors.length > 0}
+        disabled={!plan || plan.errors.length > 0 || sending}
         onClick={submit}
       >
-        Åpne {side} {coin.ticker} i papirkontoen
+        {sending ? 'Sender…' : `Åpne ${side} ${coin.ticker} i papirkontoen`}
       </button>
+      <p className="muted small">Serveren sjekker stop, mål og likvidasjon hvert minutt, også når appen er lukket.</p>
     </div>
   )
 }

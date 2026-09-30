@@ -1,12 +1,28 @@
 import { coinBySymbol } from '../coins'
 import { usd, signedUsd, pct, price as fmtPrice } from '../format'
 import { useMarkPrices } from '../prices'
-import { closePosition, fillPrice, unrealizedPnl } from './engine'
-import { updatePaper, usePaper } from './store'
+import { useState } from 'react'
+import { fillPrice, unrealizedPnl } from './engine'
+import { closePaperPosition, usePaper } from './store'
+import { useAuth } from './auth'
 
 export default function PositionsTable({ symbol }: { symbol?: string }) {
   const paper = usePaper()
   const marks = useMarkPrices()
+  const { isOwner } = useAuth()
+  const [closing, setClosing] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const close = async (id: string, price: number) => {
+    setClosing(id)
+    setError(null)
+    try {
+      await closePaperPosition(id, price)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setClosing(null)
+    }
+  }
   const rows = paper.positions.filter((p) => !symbol || p.symbol === symbol)
   if (!rows.length) return <p className="muted small">Ingen åpne posisjoner{symbol ? ` i ${coinBySymbol(symbol)?.ticker}` : ''}.</p>
 
@@ -54,21 +70,22 @@ export default function PositionsTable({ symbol }: { symbol?: string }) {
                   </td>
                 )}
                 <td className="num">
-                  <button
-                    className="small-btn"
-                    disabled={!mark}
-                    onClick={() =>
-                      mark && updatePaper((s) => closePosition(s, p.id, fillPrice(p.side, mark, false), 'Manuell'))
-                    }
-                  >
-                    Lukk
-                  </button>
+                  {isOwner && (
+                    <button
+                      className="small-btn"
+                      disabled={!mark || closing === p.id}
+                      onClick={() => mark && close(p.id, fillPrice(p.side, mark, false))}
+                    >
+                      {closing === p.id ? '…' : 'Lukk'}
+                    </button>
+                  )}
                 </td>
               </tr>
             )
           })}
         </tbody>
       </table>
+      {error && <p className="msg error">{error}</p>}
       {symbol &&
         rows.map((p) => (
           <p key={p.id} className="muted small">

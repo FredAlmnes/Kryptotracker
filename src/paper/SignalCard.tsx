@@ -5,6 +5,8 @@ import { FUTURES_COSTS, hasValidStop, planPosition, type Side } from '../sizing'
 import type { Strategy } from '../strategies'
 import type { TicketPrefill } from './OrderTicket'
 import { usePaper } from './store'
+import { useAuth } from './auth'
+import { Link } from 'react-router-dom'
 
 export interface Signal {
   side: Side
@@ -29,6 +31,7 @@ export default function SignalCard({
   onTake: (prefill: TicketPrefill) => void
 }) {
   const paper = usePaper()
+  const { isOwner } = useAuth()
   const mark = useMarkPrice(symbol)
   const coin = coinBySymbol(symbol)!
   const signalId = `${strategy.id}|${symbol}|${interval}|${signal.since}`
@@ -96,6 +99,11 @@ export default function SignalCard({
       </table>
       {stale && <p className="msg warn">Kursen har allerede passert stopen. Signalet er utløpt.</p>}
       {!stop && <p className="muted small">Ingen stop i denne strategien: forslaget er 1x og 20 % av kontoen.</p>}
+      {!isOwner ? (
+        <p className="muted small">
+          {taken ? 'Tatt i papirkontoen ✓' : 'Ikke tatt i papirkontoen.'} <Link to="/portfolio">Se kontoen →</Link>
+        </p>
+      ) : (
       <button
         className={`submit ${long ? 'up-bg' : 'down-bg'}`}
         disabled={taken || stale}
@@ -113,6 +121,7 @@ export default function SignalCard({
       >
         {taken ? 'Tatt i papirkontoen ✓' : 'Ta i papirkonto…'}
       </button>
+      )}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { coinBySymbol } from '../coins'
 import { usd, signedUsd, pct, price as fmtPrice, dateTime } from '../format'
@@ -6,15 +6,33 @@ import { useMarkPrices } from '../prices'
 import { STRATEGIES } from '../strategies'
 import { journalStats, unrealizedPnl, usedMargin } from './engine'
 import PositionsTable from './PositionsTable'
-import { freshState, replacePaper, updatePaper, usePaper } from './store'
-import type { PaperState } from './types'
+import { resetPaper, updatePaperSettings, usePaper, usePaperError } from './store'
+import { sendLoginLink, signOut, useAuth } from './auth'
+import type { PaperSettings } from './types'
 
 export default function Portfolio() {
   const paper = usePaper()
   const marks = useMarkPrices()
+  const loadError = usePaperError()
+  const { user, isOwner, ready } = useAuth()
   const [confirmReset, setConfirmReset] = useState(false)
-  const [importError, setImportError] = useState<string | null>(null)
-  const fileInput = useRef<HTMLInputElement>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [email, setEmail] = useState('')
+  const [linkSent, setLinkSent] = useState(false)
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 5000)
+    return () => clearInterval(id)
+  }, [])
+  const run = async (f: () => Promise<unknown>) => {
+    setActionError(null)
+    try {
+      await f()
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e))
+    }
+  }
+  const engineAge = paper.engineCheckedAt ? Math.round((now - paper.engineCheckedAt) / 1000) : null
 
   const unrealized = paper.positions.reduce((s, p) => s + (marks[p.symbol] ? unrealizedPnl(p, marks[p.symbol]) : 0), 0)
   const equity = paper.balance + unrealized
@@ -23,11 +41,9 @@ export default function Portfolio() {
   const s = paper.settings
   const strategyName = (id?: string) => (id ? (STRATEGIES.find((x) => x.id === id)?.name ?? id) : 'Manuell')
 
-  const setSetting = (key: keyof typeof s, value: number) => {
-    if (!Number.isFinite(value) || value <= 0) return
-    updatePaper((d) => {
-      d.settings[key] = value
-    })
+  const setSetting = (key: keyof PaperSettings, value: number) => {
+    if (!Number.isFinite(value) || value <= 0 || value === s[key]) return
+    run(() => updatePaperSettings({ [key]: value }))
   }
 
   const exportJson = () => {
@@ -39,17 +55,6 @@ export default function Portfolio() {
     URL.revokeObjectURL(a.href)
   }
 
-  const importJson = async (file: File) => {
-    try {
-      const data = JSON.parse(await file.text()) as PaperState
-      if (data.version !== 1 || !Array.isArray(data.positions) || !Array.isArray(data.journal)) throw new Error()
-      replacePaper(data)
-      setImportError(null)
-    } catch {
-      setImportError('Filen er ikke en gyldig papirkonto-eksport.')
-    }
-  }
-
   return (
     <main className="lab">
       <Link to="/" className="muted">
@@ -57,8 +62,15 @@ export default function Portfolio() {
       </Link>
       <header className="detail-head">
         <h1>Papirkonto</h1>
-        <span className="muted small">Binance USDT-M futures-priser · isolated margin · ingen ekte penger</span>
+        <span className="muted small">
+          Binance USDT-M futures-priser · isolated margin · ingen ekte penger ·{' '}
+          <span className={engineAge !== null && engineAge < 150 ? 'up' : 'down'}>
+            {engineAge === null ? 'motoren har ikke kjørt ennå' : `motoren sjekket for ${engineAge} s siden`}
+          </span>
+        </span>
       </header>
+      {loadError && <p className="msg error">Kunne ikke hente kontoen: {loadError}</p>}
+      {!paper.loaded && !loadError && <p className="muted">Henter kontoen…</p>}
 
       <div className="cards">
         <div className="card">
@@ -138,7 +150,7 @@ export default function Portfolio() {
                   <tr key={t.id}>
                     <td className="muted">
                       {dateTime(t.closedAt)}
-                      {t.replayed && <span title="Lukket mens appen var lukket, funnet i ettertid"> ⟲</span>}
+                      {t.byServer && <span title="Lukket automatisk av motoren på serveren"> ⚙</span>}
                     </td>
                     <td>
                       <span className={t.side === 'long' ? 'up' : 'down'}>{t.side === 'long' ? 'Long' : 'Short'}</span>{' '}
@@ -158,48 +170,70 @@ export default function Portfolio() {
         </div>
       )}
 
-      <h2 className="lab-h2">Innstillinger</h2>
-      <div className="settings">
-        <label>
-          Risiko per handel (%)
-          <input type="number" step={0.25} defaultValue={s.riskPct * 100} onBlur={(e) => setSetting('riskPct', Number(e.target.value) / 100)} />
-        </label>
-        <label>
-          Standard giring
-          <input type="number" step={1} defaultValue={s.defaultLeverage} onBlur={(e) => setSetting('defaultLeverage', Math.round(Number(e.target.value)))} />
-        </label>
-        <label>
-          Maks giring
-          <input type="number" step={1} max={125} defaultValue={s.maxLeverage} onBlur={(e) => setSetting('maxLeverage', Math.min(125, Math.round(Number(e.target.value))))} />
-        </label>
-        <label>
-          Startbeløp (ved nullstilling)
-          <input type="number" step={1000} defaultValue={s.startBalance} onBlur={(e) => setSetting('startBalance', Number(e.target.value))} />
-        </label>
-      </div>
-      <div className="intervals" style={{ marginTop: '1rem' }}>
-        <button onClick={exportJson}>Last ned backup (JSON)</button>
-        <button onClick={() => fileInput.current?.click()}>Importer backup</button>
-        <input
-          ref={fileInput}
-          type="file"
-          accept="application/json"
-          hidden
-          onChange={(e) => e.target.files?.[0] && importJson(e.target.files[0])}
-        />
-        {!confirmReset ? (
-          <button onClick={() => setConfirmReset(true)}>Nullstill konto</button>
-        ) : (
-          <>
-            <button className="down-bg" onClick={() => (replacePaper(freshState(paper.settings)), setConfirmReset(false))}>
-              Ja, slett alt og start på {usd(s.startBalance, 0)}
-            </button>
-            <button onClick={() => setConfirmReset(false)}>Avbryt</button>
-          </>
-        )}
-      </div>
-      {importError && <p className="msg error">{importError}</p>}
-      <p className="muted small">Lagres bare i denne nettleseren. Ta backup hvis du vil flytte eller beholde den.</p>
+      <h2 className="lab-h2">{isOwner ? 'Innstillinger' : 'Innlogging'}</h2>
+      {!ready ? null : isOwner ? (
+        <>
+          <div className="settings">
+            <label>
+              Risiko per handel (%)
+              <input type="number" step={0.25} defaultValue={s.riskPct * 100} onBlur={(e) => setSetting('riskPct', Number(e.target.value) / 100)} />
+            </label>
+            <label>
+              Standard giring
+              <input type="number" step={1} defaultValue={s.defaultLeverage} onBlur={(e) => setSetting('defaultLeverage', Math.round(Number(e.target.value)))} />
+            </label>
+            <label>
+              Maks giring
+              <input type="number" step={1} max={125} defaultValue={s.maxLeverage} onBlur={(e) => setSetting('maxLeverage', Math.min(125, Math.round(Number(e.target.value))))} />
+            </label>
+            <label>
+              Startbeløp (ved nullstilling)
+              <input type="number" step={1000} defaultValue={s.startBalance} onBlur={(e) => setSetting('startBalance', Number(e.target.value))} />
+            </label>
+          </div>
+          <div className="intervals" style={{ marginTop: '1rem' }}>
+            <button onClick={exportJson}>Last ned backup (JSON)</button>
+            {!confirmReset ? (
+              <button onClick={() => setConfirmReset(true)}>Nullstill konto</button>
+            ) : (
+              <>
+                <button className="down-bg" onClick={() => (run(() => resetPaper(s.startBalance)), setConfirmReset(false))}>
+                  Ja, slett alt og start på {usd(s.startBalance, 0)}
+                </button>
+                <button onClick={() => setConfirmReset(false)}>Avbryt</button>
+              </>
+            )}
+            <button onClick={() => signOut()}>Logg ut</button>
+          </div>
+          <p className="muted small">
+            Innlogget som {user?.email}. Du er eier og kan handle. Alle andre ser kontoen uten å kunne endre den.
+          </p>
+        </>
+      ) : user ? (
+        <p className="muted small">
+          Innlogget som {user.email}, men bare eieren kan handle. Du ser kontoen live.{' '}
+          <button className="link" onClick={() => signOut()}>
+            Logg ut
+          </button>
+        </p>
+      ) : (
+        <form
+          className="intervals"
+          onSubmit={(e) => {
+            e.preventDefault()
+            run(async () => {
+              await sendLoginLink(email.trim())
+              setLinkSent(true)
+            })
+          }}
+        >
+          <input className="text-input" type="email" required placeholder="e-post" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <button type="submit">Send innloggingslenke</button>
+          {linkSent && <span className="muted small label">Sjekk e-posten din og trykk på lenken.</span>}
+        </form>
+      )}
+      {actionError && <p className="msg error">{actionError}</p>}
+      <p className="muted small">Kontoen er felles og ligger i Supabase. Alle som har lenken ser den samme utviklingen.</p>
     </main>
   )
 }

@@ -8,6 +8,7 @@ import { STRATEGIES } from './strategies'
 import OrderTicket, { type PreviewLine, type TicketPrefill } from './paper/OrderTicket'
 import PositionsTable from './paper/PositionsTable'
 import { usePaper } from './paper/store'
+import { useAuth } from './paper/auth'
 
 export default function CoinDetail() {
   const { ticker } = useParams()
@@ -28,6 +29,7 @@ export default function CoinDetail() {
   const [ticket, setTicket] = useState<TicketPrefill | null>(null)
   const [preview, setPreview] = useState<PreviewLine[]>([])
   const paper = usePaper()
+  const { isOwner } = useAuth()
   const priceLines = useMemo(() => {
     const lines: PreviewLine[] = [...preview]
     for (const p of paper.positions) {
@@ -104,7 +106,7 @@ export default function CoinDetail() {
           Short
         </button>
         <span className="sep" />
-        <button onClick={() => setTicket({ side: 'long' })}>Ny ordre</button>
+        {isOwner && <button onClick={() => setTicket({ side: 'long' })}>Ny ordre</button>}
         <Link to="/portfolio" className="nav-link">
           Papirkonto →
         </Link>
@@ -119,7 +121,7 @@ export default function CoinDetail() {
           priceLines={priceLines}
         />
         <div className="side">
-          {ticket && (
+          {ticket && isOwner && (
             <OrderTicket
               key={JSON.stringify(ticket)}
               symbol={coin.symbol}
