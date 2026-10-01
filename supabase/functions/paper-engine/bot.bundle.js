@@ -243,7 +243,17 @@ function makeFvgStructure(p = {}) {
   };
 }
 var fvgStructure = makeFvgStructure();
-var ICT_DEFAULTS = { htfFactor: 4, swingN: 3, sweepWindow: 12, entryWindow: 24, displacementAtr: 1, minRR: 1.5 };
+var ICT_DEFAULTS = {
+  htfFactor: 4,
+  swingN: 3,
+  sweepWindow: 12,
+  entryWindow: 24,
+  displacementAtr: 1,
+  minRR: 1.5,
+  htfFilter: true,
+  discount: true,
+  fvgMinAtr: 0.2
+};
 var mirror = (c) => c.map((x) => ({ time: x.time, open: -x.open, high: -x.low, low: -x.high, close: -x.close }));
 function htfBias(c, factor, n) {
   const sec = barSeconds(c);
@@ -318,12 +328,12 @@ function ictLongRunner(c, bias, p) {
       if (mss) {
         let fvg = null;
         for (let k = Math.max(mss.sweepIndex + 1, 2); k <= i; k++)
-          if (c[k].low - c[k - 2].high > 0.2 * atr[k]) fvg = { top: c[k].low, bottom: c[k - 2].high };
+          if (c[k].low - c[k - 2].high > p.fvgMinAtr * atr[k]) fvg = { top: c[k].low, bottom: c[k - 2].high };
         if (fvg) {
           let rangeHigh = -Infinity;
           for (let k = mss.sweepIndex; k <= i; k++) rangeHigh = Math.max(rangeHigh, c[k].high);
           const ce = (fvg.top + fvg.bottom) / 2;
-          if (ce <= (mss.sweepLow + rangeHigh) / 2)
+          if (!p.discount || ce <= (mss.sweepLow + rangeHigh) / 2)
             setup = { ce, fvgBottom: fvg.bottom, stop: mss.sweepLow - 0.1 * mss.atr, rangeHigh, armedAt: i };
           mss = null;
         } else if (i - mss.index >= 2 || x.close < mss.sweepLow) mss = null;
@@ -332,7 +342,7 @@ function ictLongRunner(c, bias, p) {
     // Inngang når kursen er tilbake på 50 % av FVG-en og holder bunnen
     entry(i) {
       const x = c[i];
-      if (!setup || i <= setup.armedAt || bias[i] !== 1) return null;
+      if (!setup || i <= setup.armedAt || p.htfFilter && bias[i] !== 1) return null;
       if (!(x.low <= setup.ce && x.close >= setup.fvgBottom)) return null;
       const risk = x.close - setup.stop;
       if (risk <= 0) return null;
@@ -370,8 +380,8 @@ function makeIctModel(params = {}) {
         },
         decide(i, pos) {
           if (pos) {
-            if (pos.side === "long" && bias[i] === -1) return { type: "exit", reason: "H\xF8yere tidsramme snudde ned" };
-            if (pos.side === "short" && bias[i] === 1) return { type: "exit", reason: "H\xF8yere tidsramme snudde opp" };
+            if (p.htfFilter && pos.side === "long" && bias[i] === -1) return { type: "exit", reason: "H\xF8yere tidsramme snudde ned" };
+            if (p.htfFilter && pos.side === "short" && bias[i] === 1) return { type: "exit", reason: "H\xF8yere tidsramme snudde opp" };
             return null;
           }
           const l = long.entry(i);

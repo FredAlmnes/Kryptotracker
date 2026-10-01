@@ -230,8 +230,21 @@ export interface IctParams {
   entryWindow: number // lys fra MSS til inngang
   displacementAtr: number // minste kropp på MSS-lyset, i ATR
   minRR: number // minste avstand til mål, i R
+  htfFilter: boolean // bare handle i retning av høyere tidsramme
+  discount: boolean // long bare i nedre halvdel av området (short i øvre)
+  fvgMinAtr: number // minste FVG-størrelse, i ATR
 }
-export const ICT_DEFAULTS: IctParams = { htfFactor: 4, swingN: 3, sweepWindow: 12, entryWindow: 24, displacementAtr: 1, minRR: 1.5 }
+export const ICT_DEFAULTS: IctParams = {
+  htfFactor: 4,
+  swingN: 3,
+  sweepWindow: 12,
+  entryWindow: 24,
+  displacementAtr: 1,
+  minRR: 1.5,
+  htfFilter: true,
+  discount: true,
+  fvgMinAtr: 0.2,
+}
 
 type Bar = Candle
 const mirror = (c: Bar[]): Bar[] => c.map((x) => ({ time: x.time, open: -x.open, high: -x.low, low: -x.high, close: -x.close }))
@@ -328,12 +341,12 @@ function ictLongRunner(c: Bar[], bias: number[], p: IctParams) {
       if (mss) {
         let fvg: { top: number; bottom: number } | null = null
         for (let k = Math.max(mss.sweepIndex + 1, 2); k <= i; k++)
-          if (c[k].low - c[k - 2].high > 0.2 * atr[k]) fvg = { top: c[k].low, bottom: c[k - 2].high }
+          if (c[k].low - c[k - 2].high > p.fvgMinAtr * atr[k]) fvg = { top: c[k].low, bottom: c[k - 2].high }
         if (fvg) {
           let rangeHigh = -Infinity
           for (let k = mss.sweepIndex; k <= i; k++) rangeHigh = Math.max(rangeHigh, c[k].high)
           const ce = (fvg.top + fvg.bottom) / 2
-          if (ce <= (mss.sweepLow + rangeHigh) / 2)
+          if (!p.discount || ce <= (mss.sweepLow + rangeHigh) / 2)
             setup = { ce, fvgBottom: fvg.bottom, stop: mss.sweepLow - 0.1 * mss.atr, rangeHigh, armedAt: i }
           mss = null
         } else if (i - mss.index >= 2 || x.close < mss.sweepLow) mss = null
@@ -342,7 +355,7 @@ function ictLongRunner(c: Bar[], bias: number[], p: IctParams) {
     // Inngang når kursen er tilbake på 50 % av FVG-en og holder bunnen
     entry(i: number): { stop: number; target: number } | null {
       const x = c[i]
-      if (!setup || i <= setup.armedAt || bias[i] !== 1) return null
+      if (!setup || i <= setup.armedAt || (p.htfFilter && bias[i] !== 1)) return null
       if (!(x.low <= setup.ce && x.close >= setup.fvgBottom)) return null
       const risk = x.close - setup.stop
       if (risk <= 0) return null
@@ -381,8 +394,8 @@ export function makeIctModel(params: Partial<IctParams> = {}): Strategy {
         },
         decide(i, pos) {
           if (pos) {
-            if (pos.side === 'long' && bias[i] === -1) return { type: 'exit', reason: 'Høyere tidsramme snudde ned' }
-            if (pos.side === 'short' && bias[i] === 1) return { type: 'exit', reason: 'Høyere tidsramme snudde opp' }
+            if (p.htfFilter && pos.side === 'long' && bias[i] === -1) return { type: 'exit', reason: 'Høyere tidsramme snudde ned' }
+            if (p.htfFilter && pos.side === 'short' && bias[i] === 1) return { type: 'exit', reason: 'Høyere tidsramme snudde opp' }
             return null
           }
           const l = long.entry(i)
