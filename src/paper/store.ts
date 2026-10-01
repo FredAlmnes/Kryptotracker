@@ -75,6 +75,7 @@ const toBot = (r: any): PaperBot => ({
   lastCandle: r.last_candle,
   lastAction: r.last_action,
   lastActionAt: r.last_action_at,
+  experiment: r.experiment,
 })
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -83,7 +84,7 @@ async function reload() {
     supabase.from('paper_account').select('*').eq('id', 1).single(),
     supabase.from('paper_positions').select('*').order('opened_at'),
     supabase.from('paper_trades').select('*').order('closed_at', { ascending: false }).limit(1000),
-    supabase.from('paper_bots').select('*').order('id'),
+    supabase.from('paper_bots').select('*').order('experiment').order('strategy_id').order('symbol'),
   ])
   const error = acc.error ?? pos.error ?? trades.error ?? bots.error
   if (error) {

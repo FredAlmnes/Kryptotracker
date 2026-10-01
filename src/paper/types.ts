@@ -62,6 +62,7 @@ export interface PaperBot {
   lastCandle: number | null
   lastAction: string | null
   lastActionAt: number | null
+  experiment: boolean
 }
 
 export interface PaperState {

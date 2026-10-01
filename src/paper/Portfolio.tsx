@@ -7,6 +7,7 @@ import { STRATEGIES } from '../strategies'
 import { journalStats, unrealizedPnl, usedMargin } from './engine'
 import PositionsTable from './PositionsTable'
 import BotsTable from './BotsTable'
+import StrategySummary from './StrategySummary'
 import { resetPaper, updatePaperSettings, usePaper, usePaperError } from './store'
 import { sendLoginLink, signOut, useAuth } from './auth'
 import type { PaperSettings } from './types'
@@ -96,6 +97,9 @@ export default function Portfolio() {
           <div className="muted small">{usd(paper.balance - usedMargin(paper), 0)} ledig</div>
         </div>
       </div>
+
+      <h2 className="lab-h2">Resultat per strategi</h2>
+      <StrategySummary />
 
       <h2 className="lab-h2">Boter</h2>
       <BotsTable />

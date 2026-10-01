@@ -41,6 +41,7 @@ export default function BotsTable() {
               <tr key={b.id}>
                 <td>
                   <strong>{coinBySymbol(b.symbol)?.ticker ?? b.symbol}</strong> <span className="muted">{b.interval}</span>
+                  {b.experiment && <span className="tag">eksperiment</span>}
                   <div className="muted small">
                     {trades.length} handler · {signedUsd(total)}
                   </div>
@@ -112,8 +113,9 @@ export default function BotsTable() {
       </table>
       {error && <p className="msg error">{error}</p>}
       <p className="muted small">
-        Botene kjører på serveren. Når et {paper.bots[0]?.interval}-lys lukkes, kjører de strategien med samme kode som
-        backtesten, og åpner eller lukker selv. Stop, trailing og funding sjekkes hvert minutt. Et av/på-valg eller ny
+        Botene kjører på serveren. Når et lys i botens intervall lukkes, kjører de strategien med samme kode som
+        backtesten, og åpner eller lukker selv. Eksperimentene bruker 0,5 % risiko: de tester strategier og coins som ikke
+        holdt i backtesten, for å se om det stemmer live. Stop, trailing og funding sjekkes hvert minutt. Et av/på-valg eller ny
         risiko gjelder fra neste signal; åpne posisjoner lukkes ikke av at boten slås av.
       </p>
     </div>
