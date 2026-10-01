@@ -219,6 +219,185 @@ export function makeFvgStructure(p: FvgParams = {}): Strategy {
 
 const fvgStructure = makeFvgStructure()
 
+// ---------- ICT-modell ----------
+// Liquidity sweep → market structure shift med displacement → inngang på 50 % av FVG-en i discount,
+// i retning av strukturen på høyere tidsramme. Stop under sweepen, mål på motsatt likviditet.
+
+export interface IctParams {
+  htfFactor: number // høyere tidsramme = så mange lys (1t × 4 = 4t, 4t × 6 = 1d)
+  swingN: number // lys på hver side for topper/bunner
+  sweepWindow: number // lys fra sweep til MSS
+  entryWindow: number // lys fra MSS til inngang
+  displacementAtr: number // minste kropp på MSS-lyset, i ATR
+  minRR: number // minste avstand til mål, i R
+}
+export const ICT_DEFAULTS: IctParams = { htfFactor: 4, swingN: 3, sweepWindow: 12, entryWindow: 24, displacementAtr: 1, minRR: 1.5 }
+
+type Bar = Candle
+const mirror = (c: Bar[]): Bar[] => c.map((x) => ({ time: x.time, open: -x.open, high: -x.low, low: -x.high, close: -x.close }))
+
+// Retning på høyere tidsramme per lys: +1 opp, -1 ned, 0 ukjent. Bruker bare HTF-lys som er ferdige.
+function htfBias(c: Bar[], factor: number, n: number): number[] {
+  const sec = barSeconds(c)
+  const span = sec * factor
+  const buckets: (Bar & { last: number })[] = []
+  for (let i = 0; i < c.length; i++) {
+    const start = Math.floor(c[i].time / span) * span
+    const b = buckets.at(-1)
+    if (b && b.time === start) {
+      b.high = Math.max(b.high, c[i].high)
+      b.low = Math.min(b.low, c[i].low)
+      b.close = c[i].close
+      b.last = i
+    } else buckets.push({ time: start, open: c[i].open, high: c[i].high, low: c[i].low, close: c[i].close, last: i })
+  }
+  // bare ferdige bøtter (siste lys i bøtta er det siste lyset i perioden)
+  const done = buckets.filter((b) => c[b.last].time + sec >= b.time + span)
+  const sw = swings(done, n)
+  const byConfirm = new Map<number, Swing[]>()
+  for (const x of sw) byConfirm.set(x.confirmedAt, [...(byConfirm.get(x.confirmedAt) ?? []), x])
+  const biasAt: number[] = []
+  let trend = 0
+  let hi: number | null = null
+  let lo: number | null = null
+  for (let k = 0; k < done.length; k++) {
+    for (const x of byConfirm.get(k) ?? []) {
+      if (x.type === 'high') hi = x.price
+      else lo = x.price
+    }
+    if (hi !== null && done[k].close > hi) trend = 1
+    if (lo !== null && done[k].close < lo) trend = -1
+    biasAt.push(trend)
+  }
+  const out = new Array<number>(c.length).fill(0)
+  let k = -1
+  for (let i = 0; i < c.length; i++) {
+    while (k + 1 < done.length && done[k + 1].last <= i) k++
+    out[i] = k >= 0 ? biasAt[k] : 0
+  }
+  return out
+}
+
+interface IctSetup {
+  ce: number
+  fvgBottom: number
+  stop: number
+  rangeHigh: number
+  armedAt: number
+}
+
+// Long-oppsett. Short = samme logikk på speilvendte priser.
+function ictLongRunner(c: Bar[], bias: number[], p: IctParams) {
+  const atr = atrValues(c, 14)
+  const byConfirm = new Map<number, Swing[]>()
+  for (const x of swings(c, p.swingN)) byConfirm.set(x.confirmedAt, [...(byConfirm.get(x.confirmedAt) ?? []), x])
+  let lows: Swing[] = [] // urørt sell-side likviditet
+  let highs: Swing[] = [] // urørt buy-side likviditet
+  let lastHigh: Swing | null = null
+  let sweep: { low: number; index: number } | null = null
+  // brudd funnet; FVG-en fra displacement-lyset er først kjent 1 lys senere, så vi venter inntil 2 lys
+  let mss: { index: number; sweepLow: number; sweepIndex: number; atr: number } | null = null
+  let setup: IctSetup | null = null
+
+  return {
+    update(i: number) {
+      const x = c[i]
+      for (const s of byConfirm.get(i) ?? []) {
+        if (s.type === 'low') lows.push(s)
+        else {
+          highs.push(s)
+          lastHigh = s
+        }
+      }
+      // sweep: wick under en urørt bunn, lukker tilbake over
+      const swept = lows.filter((l) => x.low < l.price)
+      if (swept.length && x.close > Math.min(...swept.map((l) => l.price))) sweep = { low: x.low, index: i }
+      else if (sweep && x.close < sweep.low) sweep = null // ny bunn under sweepen: oppsettet er brutt
+      lows = lows.filter((l) => x.low >= l.price && i - l.index < 200)
+      highs = highs.filter((h) => x.high <= h.price && i - h.index < 500)
+
+      if (setup && (i - setup.armedAt > p.entryWindow || x.close < setup.fvgBottom)) setup = null
+      if (sweep && i - sweep.index > p.sweepWindow) sweep = null
+
+      // MSS: displacement-lys lukker over siste topp etter sweepen
+      if (sweep && lastHigh && i > sweep.index && x.close > lastHigh.price && x.close - x.open >= p.displacementAtr * atr[i]) {
+        mss = { index: i, sweepLow: sweep.low, sweepIndex: sweep.index, atr: atr[i] }
+        sweep = null
+      }
+      // ... og utslaget må ha etterlatt en FVG (sjekkes til og med 2 lys etter bruddet)
+      if (mss) {
+        let fvg: { top: number; bottom: number } | null = null
+        for (let k = Math.max(mss.sweepIndex + 1, 2); k <= i; k++)
+          if (c[k].low - c[k - 2].high > 0.2 * atr[k]) fvg = { top: c[k].low, bottom: c[k - 2].high }
+        if (fvg) {
+          let rangeHigh = -Infinity
+          for (let k = mss.sweepIndex; k <= i; k++) rangeHigh = Math.max(rangeHigh, c[k].high)
+          const ce = (fvg.top + fvg.bottom) / 2
+          if (ce <= (mss.sweepLow + rangeHigh) / 2)
+            setup = { ce, fvgBottom: fvg.bottom, stop: mss.sweepLow - 0.1 * mss.atr, rangeHigh, armedAt: i }
+          mss = null
+        } else if (i - mss.index >= 2 || x.close < mss.sweepLow) mss = null
+      }
+    },
+    // Inngang når kursen er tilbake på 50 % av FVG-en og holder bunnen
+    entry(i: number): { stop: number; target: number } | null {
+      const x = c[i]
+      if (!setup || i <= setup.armedAt || bias[i] !== 1) return null
+      if (!(x.low <= setup.ce && x.close >= setup.fvgBottom)) return null
+      const risk = x.close - setup.stop
+      if (risk <= 0) return null
+      const liquidity = highs.filter((h) => h.price >= x.close + p.minRR * risk).map((h) => h.price)
+      if (!liquidity.length) return null // ingen likviditet langt nok unna: dårlig R:R
+      const s = setup
+      setup = null
+      return { stop: s.stop, target: Math.min(...liquidity) }
+    },
+  }
+}
+
+export function makeIctModel(params: Partial<IctParams> = {}): Strategy {
+  const p = { ...ICT_DEFAULTS, ...params }
+  const isDefault = Object.entries(params).every(([k, v]) => ICT_DEFAULTS[k as keyof IctParams] === v)
+  return {
+    id: isDefault ? 'ict-model' : `ict-model-${Object.values(p).join('-')}`,
+    name: isDefault ? 'ICT-modell (sweep → MSS → FVG)' : `ICT ${JSON.stringify(params)}`,
+    interval: '1h',
+    rules: [
+      `Retning: struktur på høyere tidsramme (${p.htfFactor} × dette intervallet)`,
+      'Sweep: kursen stikker under en tidligere bunn og lukker tilbake over',
+      `MSS: innen ${p.sweepWindow} lys bryter et kraftig lys (kropp ≥ ${p.displacementAtr} × ATR) siste topp og etterlater en FVG`,
+      'Inngang: tilbake på 50 % av FVG-en (i discount) og lukker over gapet',
+      `Stop under sweepen. Mål: nærmeste urørte topp minst ${p.minRR}R unna. Short er speilvendt`,
+    ],
+    warmup: 60,
+    prepare(c, { allowShort }) {
+      const bias = htfBias(c, p.htfFactor, p.swingN)
+      const long = ictLongRunner(c, bias, p)
+      const short = allowShort ? ictLongRunner(mirror(c), bias.map((b) => -b), p) : null
+      return {
+        update(i) {
+          long.update(i)
+          short?.update(i)
+        },
+        decide(i, pos) {
+          if (pos) {
+            if (pos.side === 'long' && bias[i] === -1) return { type: 'exit', reason: 'Høyere tidsramme snudde ned' }
+            if (pos.side === 'short' && bias[i] === 1) return { type: 'exit', reason: 'Høyere tidsramme snudde opp' }
+            return null
+          }
+          const l = long.entry(i)
+          if (l) return { type: 'enter', side: 'long', stop: l.stop, target: l.target, reason: 'Sweep → MSS → retest av FVG' }
+          const s = short?.entry(i)
+          if (s) return { type: 'enter', side: 'short', stop: -s.stop, target: -s.target, reason: 'Sweep → MSS → retest av FVG (short)' }
+          return null
+        },
+      }
+    },
+  }
+}
+
+const ictModel = makeIctModel()
+
 const rsiReversion: Strategy = {
   id: 'rsi-reversion',
   name: 'RSI 30/70 med trendfilter',
@@ -251,4 +430,4 @@ const rsiReversion: Strategy = {
   },
 }
 
-export const STRATEGIES: Strategy[] = [trendRegime, emaTrend, fvgStructure, rsiReversion]
+export const STRATEGIES: Strategy[] = [trendRegime, emaTrend, ictModel, fvgStructure, rsiReversion]

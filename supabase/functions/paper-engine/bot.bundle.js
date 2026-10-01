@@ -165,73 +165,226 @@ var trendRegime = {
     };
   }
 };
-var fvgStructure = {
-  id: "fvg-structure",
-  name: "FVG-retest i trendretning",
-  interval: "1h",
-  rules: [
-    "Struktur: brudd over siste bekreftede topp = opptrend, under siste bunn = nedtrend",
-    "Kj\xF8p: i opptrend, kursen tester et \xE5pent bullish FVG og lukker over det",
-    "Short: i nedtrend, kursen tester et \xE5pent bearish FVG og lukker under det",
-    "Stop: rett utenfor gapet. M\xE5l: 2 \xD7 risikoen (2R). Exit ogs\xE5 hvis strukturen snur"
-  ],
-  warmup: 50,
-  prepare(c, { allowShort }) {
-    const atr = atrValues(c, 14);
-    const N = 5;
-    const byConfirm = /* @__PURE__ */ new Map();
-    for (const s of swings(c, N)) byConfirm.set(s.confirmedAt, [...byConfirm.get(s.confirmedAt) ?? [], s]);
-    let trend = null;
-    let lastHigh = null;
-    let lastLow = null;
-    let gaps = [];
-    return {
-      update(i) {
-        for (const s of byConfirm.get(i) ?? []) {
-          if (s.type === "high") lastHigh = s.price;
-          else lastLow = s.price;
-        }
-        const close = c[i].close;
-        if (lastHigh !== null && close > lastHigh) {
-          trend = "up";
-          lastHigh = null;
-        }
-        if (lastLow !== null && close < lastLow) {
-          trend = "down";
-          lastLow = null;
-        }
-        const min = 0.3 * atr[i];
-        if (c[i].low - c[i - 2].high > min) gaps.push({ side: "bull", bottom: c[i - 2].high, top: c[i].low, index: i });
-        if (c[i - 2].low - c[i].high > min) gaps.push({ side: "bear", bottom: c[i].high, top: c[i - 2].low, index: i });
-        gaps = gaps.filter(
-          (g) => i - g.index <= 30 && (g.side === "bull" ? close >= g.bottom : close <= g.top)
-        );
-      },
-      decide(i, pos) {
-        const x = c[i];
-        if (pos) {
-          if (pos.side === "long" && trend === "down") return { type: "exit", reason: "Struktur snudde ned" };
-          if (pos.side === "short" && trend === "up") return { type: "exit", reason: "Struktur snudde opp" };
+function makeFvgStructure(p = {}) {
+  const fmt = (n) => String(n).replace(".", ",");
+  const stopRule = p.maxStopAtr ? ` Hopper over oppsett der stopen er mer enn ${fmt(p.maxStopAtr)} \xD7 ATR unna.` : "";
+  const targetRule = p.maxTargetAtr ? `M\xE5l: 2R, men maks ${fmt(p.maxTargetAtr)} \xD7 ATR` : "M\xE5l: 2 \xD7 risikoen (2R)";
+  const variant = [p.maxStopAtr && `stop\u2264${p.maxStopAtr}`, p.maxTargetAtr && `m\xE5l\u2264${p.maxTargetAtr}`].filter(Boolean).join("-");
+  return {
+    id: variant ? `fvg-structure-${variant}` : "fvg-structure",
+    name: "FVG-retest i trendretning",
+    interval: "1h",
+    rules: [
+      "Struktur: brudd over siste bekreftede topp = opptrend, under siste bunn = nedtrend",
+      "Kj\xF8p: i opptrend, kursen tester et \xE5pent bullish FVG og lukker over det",
+      "Short: i nedtrend, kursen tester et \xE5pent bearish FVG og lukker under det",
+      `Stop: rett utenfor gapet.${stopRule} ${targetRule}. Exit ogs\xE5 hvis strukturen snur`
+    ],
+    warmup: 50,
+    prepare(c, { allowShort }) {
+      const atr = atrValues(c, 14);
+      const N = 5;
+      const byConfirm = /* @__PURE__ */ new Map();
+      for (const s of swings(c, N)) byConfirm.set(s.confirmedAt, [...byConfirm.get(s.confirmedAt) ?? [], s]);
+      let trend = null;
+      let lastHigh = null;
+      let lastLow = null;
+      let gaps = [];
+      return {
+        update(i) {
+          for (const s of byConfirm.get(i) ?? []) {
+            if (s.type === "high") lastHigh = s.price;
+            else lastLow = s.price;
+          }
+          const close = c[i].close;
+          if (lastHigh !== null && close > lastHigh) {
+            trend = "up";
+            lastHigh = null;
+          }
+          if (lastLow !== null && close < lastLow) {
+            trend = "down";
+            lastLow = null;
+          }
+          const min = 0.3 * atr[i];
+          if (c[i].low - c[i - 2].high > min) gaps.push({ side: "bull", bottom: c[i - 2].high, top: c[i].low, index: i });
+          if (c[i - 2].low - c[i].high > min) gaps.push({ side: "bear", bottom: c[i].high, top: c[i - 2].low, index: i });
+          gaps = gaps.filter(
+            (g) => i - g.index <= 30 && (g.side === "bull" ? close >= g.bottom : close <= g.top)
+          );
+        },
+        decide(i, pos) {
+          const x = c[i];
+          if (pos) {
+            if (pos.side === "long" && trend === "down") return { type: "exit", reason: "Struktur snudde ned" };
+            if (pos.side === "short" && trend === "up") return { type: "exit", reason: "Struktur snudde opp" };
+            return null;
+          }
+          for (const g of gaps) {
+            if (g.index >= i) continue;
+            if (g.side === "bull" && trend === "up" && x.low <= g.top && x.close > g.top) {
+              gaps = gaps.filter((o) => o !== g);
+              const stop = g.bottom - 0.1 * atr[i];
+              if (p.maxStopAtr && x.close - stop > p.maxStopAtr * atr[i]) continue;
+              const reach = Math.min(2 * (x.close - stop), p.maxTargetAtr ? p.maxTargetAtr * atr[i] : Infinity);
+              return { type: "enter", side: "long", stop, target: x.close + reach, reason: "Retest av bullish FVG" };
+            }
+            if (allowShort && g.side === "bear" && trend === "down" && x.high >= g.bottom && x.close < g.bottom) {
+              gaps = gaps.filter((o) => o !== g);
+              const stop = g.top + 0.1 * atr[i];
+              if (p.maxStopAtr && stop - x.close > p.maxStopAtr * atr[i]) continue;
+              const reach = Math.min(2 * (stop - x.close), p.maxTargetAtr ? p.maxTargetAtr * atr[i] : Infinity);
+              return { type: "enter", side: "short", stop, target: x.close - reach, reason: "Retest av bearish FVG" };
+            }
+          }
           return null;
         }
-        for (const g of gaps) {
-          if (g.index >= i) continue;
-          if (g.side === "bull" && trend === "up" && x.low <= g.top && x.close > g.top) {
-            gaps = gaps.filter((o) => o !== g);
-            const stop = g.bottom - 0.1 * atr[i];
-            return { type: "enter", side: "long", stop, target: x.close + 2 * (x.close - stop), reason: "Retest av bullish FVG" };
-          }
-          if (allowShort && g.side === "bear" && trend === "down" && x.high >= g.bottom && x.close < g.bottom) {
-            gaps = gaps.filter((o) => o !== g);
-            const stop = g.top + 0.1 * atr[i];
-            return { type: "enter", side: "short", stop, target: x.close - 2 * (stop - x.close), reason: "Retest av bearish FVG" };
-          }
-        }
-        return null;
-      }
-    };
+      };
+    }
+  };
+}
+var fvgStructure = makeFvgStructure();
+var ICT_DEFAULTS = { htfFactor: 4, swingN: 3, sweepWindow: 12, entryWindow: 24, displacementAtr: 1, minRR: 1.5 };
+var mirror = (c) => c.map((x) => ({ time: x.time, open: -x.open, high: -x.low, low: -x.high, close: -x.close }));
+function htfBias(c, factor, n) {
+  const sec = barSeconds(c);
+  const span = sec * factor;
+  const buckets = [];
+  for (let i = 0; i < c.length; i++) {
+    const start = Math.floor(c[i].time / span) * span;
+    const b = buckets.at(-1);
+    if (b && b.time === start) {
+      b.high = Math.max(b.high, c[i].high);
+      b.low = Math.min(b.low, c[i].low);
+      b.close = c[i].close;
+      b.last = i;
+    } else buckets.push({ time: start, open: c[i].open, high: c[i].high, low: c[i].low, close: c[i].close, last: i });
   }
-};
+  const done = buckets.filter((b) => c[b.last].time + sec >= b.time + span);
+  const sw = swings(done, n);
+  const byConfirm = /* @__PURE__ */ new Map();
+  for (const x of sw) byConfirm.set(x.confirmedAt, [...byConfirm.get(x.confirmedAt) ?? [], x]);
+  const biasAt = [];
+  let trend = 0;
+  let hi = null;
+  let lo = null;
+  for (let k2 = 0; k2 < done.length; k2++) {
+    for (const x of byConfirm.get(k2) ?? []) {
+      if (x.type === "high") hi = x.price;
+      else lo = x.price;
+    }
+    if (hi !== null && done[k2].close > hi) trend = 1;
+    if (lo !== null && done[k2].close < lo) trend = -1;
+    biasAt.push(trend);
+  }
+  const out = new Array(c.length).fill(0);
+  let k = -1;
+  for (let i = 0; i < c.length; i++) {
+    while (k + 1 < done.length && done[k + 1].last <= i) k++;
+    out[i] = k >= 0 ? biasAt[k] : 0;
+  }
+  return out;
+}
+function ictLongRunner(c, bias, p) {
+  const atr = atrValues(c, 14);
+  const byConfirm = /* @__PURE__ */ new Map();
+  for (const x of swings(c, p.swingN)) byConfirm.set(x.confirmedAt, [...byConfirm.get(x.confirmedAt) ?? [], x]);
+  let lows = [];
+  let highs = [];
+  let lastHigh = null;
+  let sweep = null;
+  let mss = null;
+  let setup = null;
+  return {
+    update(i) {
+      const x = c[i];
+      for (const s of byConfirm.get(i) ?? []) {
+        if (s.type === "low") lows.push(s);
+        else {
+          highs.push(s);
+          lastHigh = s;
+        }
+      }
+      const swept = lows.filter((l) => x.low < l.price);
+      if (swept.length && x.close > Math.min(...swept.map((l) => l.price))) sweep = { low: x.low, index: i };
+      else if (sweep && x.close < sweep.low) sweep = null;
+      lows = lows.filter((l) => x.low >= l.price && i - l.index < 200);
+      highs = highs.filter((h) => x.high <= h.price && i - h.index < 500);
+      if (setup && (i - setup.armedAt > p.entryWindow || x.close < setup.fvgBottom)) setup = null;
+      if (sweep && i - sweep.index > p.sweepWindow) sweep = null;
+      if (sweep && lastHigh && i > sweep.index && x.close > lastHigh.price && x.close - x.open >= p.displacementAtr * atr[i]) {
+        mss = { index: i, sweepLow: sweep.low, sweepIndex: sweep.index, atr: atr[i] };
+        sweep = null;
+      }
+      if (mss) {
+        let fvg = null;
+        for (let k = Math.max(mss.sweepIndex + 1, 2); k <= i; k++)
+          if (c[k].low - c[k - 2].high > 0.2 * atr[k]) fvg = { top: c[k].low, bottom: c[k - 2].high };
+        if (fvg) {
+          let rangeHigh = -Infinity;
+          for (let k = mss.sweepIndex; k <= i; k++) rangeHigh = Math.max(rangeHigh, c[k].high);
+          const ce = (fvg.top + fvg.bottom) / 2;
+          if (ce <= (mss.sweepLow + rangeHigh) / 2)
+            setup = { ce, fvgBottom: fvg.bottom, stop: mss.sweepLow - 0.1 * mss.atr, rangeHigh, armedAt: i };
+          mss = null;
+        } else if (i - mss.index >= 2 || x.close < mss.sweepLow) mss = null;
+      }
+    },
+    // Inngang når kursen er tilbake på 50 % av FVG-en og holder bunnen
+    entry(i) {
+      const x = c[i];
+      if (!setup || i <= setup.armedAt || bias[i] !== 1) return null;
+      if (!(x.low <= setup.ce && x.close >= setup.fvgBottom)) return null;
+      const risk = x.close - setup.stop;
+      if (risk <= 0) return null;
+      const liquidity = highs.filter((h) => h.price >= x.close + p.minRR * risk).map((h) => h.price);
+      if (!liquidity.length) return null;
+      const s = setup;
+      setup = null;
+      return { stop: s.stop, target: Math.min(...liquidity) };
+    }
+  };
+}
+function makeIctModel(params = {}) {
+  const p = { ...ICT_DEFAULTS, ...params };
+  const isDefault = Object.entries(params).every(([k, v]) => ICT_DEFAULTS[k] === v);
+  return {
+    id: isDefault ? "ict-model" : `ict-model-${Object.values(p).join("-")}`,
+    name: isDefault ? "ICT-modell (sweep \u2192 MSS \u2192 FVG)" : `ICT ${JSON.stringify(params)}`,
+    interval: "1h",
+    rules: [
+      `Retning: struktur p\xE5 h\xF8yere tidsramme (${p.htfFactor} \xD7 dette intervallet)`,
+      "Sweep: kursen stikker under en tidligere bunn og lukker tilbake over",
+      `MSS: innen ${p.sweepWindow} lys bryter et kraftig lys (kropp \u2265 ${p.displacementAtr} \xD7 ATR) siste topp og etterlater en FVG`,
+      "Inngang: tilbake p\xE5 50 % av FVG-en (i discount) og lukker over gapet",
+      `Stop under sweepen. M\xE5l: n\xE6rmeste ur\xF8rte topp minst ${p.minRR}R unna. Short er speilvendt`
+    ],
+    warmup: 60,
+    prepare(c, { allowShort }) {
+      const bias = htfBias(c, p.htfFactor, p.swingN);
+      const long = ictLongRunner(c, bias, p);
+      const short = allowShort ? ictLongRunner(mirror(c), bias.map((b) => -b), p) : null;
+      return {
+        update(i) {
+          long.update(i);
+          short?.update(i);
+        },
+        decide(i, pos) {
+          if (pos) {
+            if (pos.side === "long" && bias[i] === -1) return { type: "exit", reason: "H\xF8yere tidsramme snudde ned" };
+            if (pos.side === "short" && bias[i] === 1) return { type: "exit", reason: "H\xF8yere tidsramme snudde opp" };
+            return null;
+          }
+          const l = long.entry(i);
+          if (l) return { type: "enter", side: "long", stop: l.stop, target: l.target, reason: "Sweep \u2192 MSS \u2192 retest av FVG" };
+          const s = short?.entry(i);
+          if (s) return { type: "enter", side: "short", stop: -s.stop, target: -s.target, reason: "Sweep \u2192 MSS \u2192 retest av FVG (short)" };
+          return null;
+        }
+      };
+    }
+  };
+}
+var ictModel = makeIctModel();
 var rsiReversion = {
   id: "rsi-reversion",
   name: "RSI 30/70 med trendfilter",
@@ -263,7 +416,7 @@ var rsiReversion = {
     };
   }
 };
-var STRATEGIES = [trendRegime, emaTrend, fvgStructure, rsiReversion];
+var STRATEGIES = [trendRegime, emaTrend, ictModel, fvgStructure, rsiReversion];
 
 // src/sizing.ts
 var SPOT_COSTS = { feePerSide: 15e-4, fundingPer8h: 0, mmr: 0 };
