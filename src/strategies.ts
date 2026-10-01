@@ -131,15 +131,25 @@ const trendRegime: Strategy = {
   },
 }
 
-const fvgStructure: Strategy = {
-  id: 'fvg-structure',
+export interface FvgParams {
+  maxStopAtr?: number // hopp over oppsett der stopen ligger lenger unna enn dette × ATR
+  maxTargetAtr?: number // mål = laveste av 2R og dette × ATR
+}
+
+export function makeFvgStructure(p: FvgParams = {}): Strategy {
+  const fmt = (n: number) => String(n).replace('.', ',')
+  const stopRule = p.maxStopAtr ? ` Hopper over oppsett der stopen er mer enn ${fmt(p.maxStopAtr)} × ATR unna.` : ''
+  const targetRule = p.maxTargetAtr ? `Mål: 2R, men maks ${fmt(p.maxTargetAtr)} × ATR` : 'Mål: 2 × risikoen (2R)'
+  const variant = [p.maxStopAtr && `stop≤${p.maxStopAtr}`, p.maxTargetAtr && `mål≤${p.maxTargetAtr}`].filter(Boolean).join('-')
+  return {
+  id: variant ? `fvg-structure-${variant}` : 'fvg-structure',
   name: 'FVG-retest i trendretning',
   interval: '1h',
   rules: [
     'Struktur: brudd over siste bekreftede topp = opptrend, under siste bunn = nedtrend',
     'Kjøp: i opptrend, kursen tester et åpent bullish FVG og lukker over det',
     'Short: i nedtrend, kursen tester et åpent bearish FVG og lukker under det',
-    'Stop: rett utenfor gapet. Mål: 2 × risikoen (2R). Exit også hvis strukturen snur',
+    `Stop: rett utenfor gapet.${stopRule} ${targetRule}. Exit også hvis strukturen snur`,
   ],
   warmup: 50,
   prepare(c, { allowShort }) {
@@ -188,12 +198,16 @@ const fvgStructure: Strategy = {
           if (g.side === 'bull' && trend === 'up' && x.low <= g.top && x.close > g.top) {
             gaps = gaps.filter((o) => o !== g)
             const stop = g.bottom - 0.1 * atr[i]
-            return { type: 'enter', side: 'long', stop, target: x.close + 2 * (x.close - stop), reason: 'Retest av bullish FVG' }
+            if (p.maxStopAtr && x.close - stop > p.maxStopAtr * atr[i]) continue // for bredt: målet blir urealistisk
+            const reach = Math.min(2 * (x.close - stop), p.maxTargetAtr ? p.maxTargetAtr * atr[i] : Infinity)
+            return { type: 'enter', side: 'long', stop, target: x.close + reach, reason: 'Retest av bullish FVG' }
           }
           if (allowShort && g.side === 'bear' && trend === 'down' && x.high >= g.bottom && x.close < g.bottom) {
             gaps = gaps.filter((o) => o !== g)
             const stop = g.top + 0.1 * atr[i]
-            return { type: 'enter', side: 'short', stop, target: x.close - 2 * (stop - x.close), reason: 'Retest av bearish FVG' }
+            if (p.maxStopAtr && stop - x.close > p.maxStopAtr * atr[i]) continue
+            const reach = Math.min(2 * (stop - x.close), p.maxTargetAtr ? p.maxTargetAtr * atr[i] : Infinity)
+            return { type: 'enter', side: 'short', stop, target: x.close - reach, reason: 'Retest av bearish FVG' }
           }
         }
         return null
@@ -201,6 +215,9 @@ const fvgStructure: Strategy = {
     }
   },
 }
+}
+
+const fvgStructure = makeFvgStructure()
 
 const rsiReversion: Strategy = {
   id: 'rsi-reversion',
